@@ -1,0 +1,25 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv/
+
+# Caches
+/.ruff_cache/
+
+# Editors
+/.vscode/
+
+# Configuration files
+/config.toml
+
+# Study checkpoints
+/checkpoints/
+
+# Residual plots
+/plots/

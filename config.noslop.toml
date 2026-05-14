@@ -1,0 +1,26 @@
+# This configuration uses mlabonne/no_slop dataset for evaluation,
+# which is a more comprehensive dataset for measuring refusal behavior.
+
+# Good prompts for calculating refusal directions (unchanged).
+[good_prompts]
+dataset = "mlabonne/harmless_alpaca"
+split = "train[:400]"
+column = "text"
+
+# Bad prompts for calculating refusal directions (unchanged).
+[bad_prompts]
+dataset = "mlabonne/harmful_behaviors"
+split = "train[:400]"
+column = "text"
+
+# Good evaluation prompts (unchanged).
+[good_evaluation_prompts]
+dataset = "mlabonne/harmless_alpaca"
+split = "test[:100]"
+column = "text"
+
+# Bad evaluation prompts (changed to no_slop).
+[bad_evaluation_prompts]
+dataset = "mlabonne/no_slop"
+split = "test[:200]"
+column = "prompt"
