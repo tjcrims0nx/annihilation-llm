@@ -1,0 +1,41 @@
+name: Sync from upstream (heretic)
+
+on:
+  schedule:
+    # Check for upstream changes every 6 hours
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Mirror upstream to this repo
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/p-e-w/heretic.git
+
+      - name: Fetch upstream
+        run: git fetch upstream
+
+      - name: Determine upstream default branch
+        id: upstream-branch
+        run: |
+          DEFAULT_BRANCH=$(git remote show upstream | grep 'HEAD branch' | awk '{print $NF}')
+          echo "branch=$DEFAULT_BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Force-sync main from upstream
+        run: |
+          git checkout main
+          git reset --hard upstream/${{ steps.upstream-branch.outputs.branch }}
+
+      - name: Force push to origin
+        run: git push origin main --force
