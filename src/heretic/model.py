@@ -2,7 +2,9 @@
 # Copyright (C) 2025-2026  Philipp Emanuel Weidmann <pew@worldwidemann.com> + contributors
 
 import math
+import re
 from importlib import import_module
+from importlib.metadata import PackageNotFoundError, version as distribution_version
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Type, cast
@@ -45,6 +47,40 @@ def require_bitsandbytes() -> Any:
             'Install it with "pip install annihilate-llm[bnb]" '
             "on a supported platform, or use quantization = \"none\"."
         ) from exc
+
+
+def version_less_than(version: str, minimum: str) -> bool:
+    def parts(value: str) -> tuple[int, ...]:
+        base = re.split(r"[+-]", value, maxsplit=1)[0]
+        return tuple(int(part) for part in base.split(".") if part.isdigit())
+
+    return parts(version) < parts(minimum)
+
+
+def disable_incompatible_torchao() -> None:
+    try:
+        torchao_version = distribution_version("torchao")
+    except PackageNotFoundError:
+        return
+
+    if not version_less_than(torchao_version, "0.16.0"):
+        return
+
+    print(
+        "[yellow]Found incompatible torchao "
+        f"{torchao_version}; disabling PEFT torchao integration.[/]"
+    )
+
+    def unavailable() -> bool:
+        return False
+
+    with suppress(Exception):
+        peft_import_utils = import_module("peft.import_utils")
+        peft_import_utils.is_torchao_available = unavailable
+
+    with suppress(Exception):
+        peft_lora_torchao = import_module("peft.tuners.lora.torchao")
+        peft_lora_torchao.is_torchao_available = unavailable
 
 
 def get_model_class(
@@ -235,6 +271,7 @@ class Model:
 
         # self.peft_config is a LoraConfig object rather than a dictionary,
         # so the result is a PeftModel rather than a PeftMixedModel.
+        disable_incompatible_torchao()
         self.model = cast(PeftModel, get_peft_model(self.model, self.peft_config))
 
         display_targets = sorted({name.rsplit(".", 1)[-1] for name in target_modules})
