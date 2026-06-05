@@ -8,7 +8,7 @@ on:
 
 jobs:
   sync:
-    name: Mirror upstream to this repo
+    name: Copy upstream code to this repo
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -32,10 +32,18 @@ jobs:
           DEFAULT_BRANCH=$(git remote show upstream | grep 'HEAD branch' | awk '{print $NF}')
           echo "branch=$DEFAULT_BRANCH" >> "$GITHUB_OUTPUT"
 
-      - name: Force-sync main from upstream
+      - name: Sync code from upstream
         run: |
-          git checkout main
-          git reset --hard upstream/${{ steps.upstream-branch.outputs.branch }}
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -r --ignore-unmatch .
+          git checkout upstream/${{ steps.upstream-branch.outputs.branch }} -- .
+          git checkout HEAD -- .github
+          if git diff --cached --quiet; then
+            echo "No upstream changes to sync."
+          else
+            git commit -m "Sync code from upstream"
+          fi
 
-      - name: Force push to origin
-        run: git push origin main --force
+      - name: Push to origin
+        run: git push origin HEAD:main
