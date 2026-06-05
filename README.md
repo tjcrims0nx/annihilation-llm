@@ -41,12 +41,6 @@
 Use a Python virtual environment so Annihilation's dependencies do not collide
 with packages installed globally.
 
-[![Open free Colab smoke test](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/tjcrims0nx/annihilation-llm/blob/main/notebooks/free_colab_smolLM2_1_7B_smoke_test.ipynb)
-
-The Colab notebook uses `HuggingFaceTB/SmolLM2-1.7B-Instruct` with small
-free-tier settings to test install, GPU detection, model loading, and a short
-optimization run.
-
 ```powershell
 # Windows PowerShell
 python -m venv annihilation-env
