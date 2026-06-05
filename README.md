@@ -38,9 +38,26 @@
 
 ## 🚀 Quick Start
 
+Use a Python virtual environment so Annihilation's dependencies do not collide
+with packages installed globally.
+
+```powershell
+# Windows PowerShell
+python -m venv annihilation-env
+.\annihilation-env\Scripts\Activate.ps1
+python -m pip install -U pip
+python -m pip install -U annihilation-llm-tjcrims0nx
+
+# Decensor any model automatically
+annihilation Qwen/Qwen3-4B-Instruct-2507
+```
+
 ```bash
-# Install Annihilation
-pip install -U annihilation-llm-tjcrims0nx
+# macOS/Linux/Android terminal
+python -m venv annihilation-env
+source annihilation-env/bin/activate
+python -m pip install -U pip
+python -m pip install -U annihilation-llm-tjcrims0nx
 
 # Decensor any model automatically
 annihilation Qwen/Qwen3-4B-Instruct-2507
