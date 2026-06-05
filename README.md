@@ -87,7 +87,7 @@ Prepare a Python 3.10+ environment with PyTorch 2.2+ installed as appropriate
 for your hardware. Then run:
 
 ```
-pip install -U heretic-llm
+pip install -U annihilation-llm-tjcrims0nx
 heretic Qwen/Qwen3-4B-Instruct-2507
 ```
 
@@ -135,7 +135,7 @@ provides features designed to support research into the semantics of model inter
 optional `research` extra:
 
 ```
-pip install -U heretic-llm[research]
+pip install -U annihilation-llm-tjcrims0nx[research]
 ```
 
 This gives you access to the following functionality:
