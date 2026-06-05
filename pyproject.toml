@@ -1,6 +1,6 @@
 [project]
 name = "annihilation-llm-tjcrims0nx"
-version = "1.3.6"
+version = "1.3.7"
 description = "Fully automatic censorship removal for language models"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -67,6 +67,7 @@ Issues = "https://github.com/tjcrims0nx/annihilation-llm/issues"
 Changelog = "https://github.com/tjcrims0nx/annihilation-llm/releases"
 
 [project.scripts]
+annihilation = "heretic.main:main"
 heretic = "heretic.main:main"
 
 [build-system]
