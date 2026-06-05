@@ -71,6 +71,35 @@ annihilate Qwen/Qwen3-4B-Instruct-2507
 - **Optional**: Install `annihilate-llm[bnb]` only on platforms
   that support bitsandbytes if you want `bnb_4bit` quantization.
 
+### GPU Setup on Windows
+
+If Windows sees your NVIDIA GPU but Annihilate says no GPU is detected, your
+virtual environment probably has CPU-only PyTorch installed.
+
+Check that Windows can see the GPU:
+
+```powershell
+nvidia-smi
+```
+
+Replace CPU-only PyTorch with a CUDA build inside the active environment:
+
+```powershell
+.\annihilation-env\Scripts\Activate.ps1
+python -m pip uninstall -y torch torchvision torchaudio
+python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+```
+
+Verify PyTorch can see CUDA:
+
+```powershell
+python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no cuda')"
+```
+
+`torch.cuda.is_available()` should print `True`. If your GPU has limited VRAM
+such as 4 GB, start with smaller models and expect larger models to run out of
+memory.
+
 ---
 
 ## ⚙️ Configuration
