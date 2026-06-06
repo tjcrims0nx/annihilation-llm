@@ -76,6 +76,10 @@ annihilate Qwen/Qwen3-4B-Instruct-2507
 If Windows sees your NVIDIA GPU but Annihilate says no GPU is detected, your
 virtual environment probably has CPU-only PyTorch installed.
 
+Newer Annihilate builds also check `nvidia-smi` directly. If the NVIDIA driver
+can see the GPU but PyTorch cannot use CUDA, Annihilate will report the GPU and
+warn that the active Python environment needs a CUDA-enabled PyTorch build.
+
 Check that Windows can see the GPU:
 
 ```powershell
