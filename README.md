@@ -156,9 +156,28 @@ annihilate --help
 | Option | Default | Description |
 |--------|---------|-------------|
 | `n_trials` | 200 | Number of optimization trials |
+| `n_startup_trials` | 60 | Random exploration trials before TPE focuses the search |
 | `quantization` | none | Model quantization (bnb_4bit) |
 | `row_normalization` | full | Weight normalization strategy |
 | `orthogonalize_direction` | true | Direction adjustment method |
+
+### Aggressive Optimization
+
+The default Annihilate run already uses the enhanced aggressive optimizer from
+upstream Heretic. It runs a multi-objective Optuna TPE search that minimizes
+both refusal count and KL divergence, using:
+
+- `n_trials = 200`
+- `n_startup_trials = 60`
+- multivariate TPE sampling
+- `n_ei_candidates = 128`
+- both global and per-layer refusal direction search
+- separate ablation kernels for attention output projections and MLP down
+  projections
+
+For a quick smoke test, lower `n_trials` and `n_startup_trials`. For a real
+service or cloud GPU run, leave the defaults in place or increase the prompt
+slices in `config.toml` if the GPU has enough time and memory.
 
 ---
 
