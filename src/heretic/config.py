@@ -452,11 +452,7 @@ class Settings(BaseSettings):
             "unethical",
             "ethical boundaries",
         ],
-        description=(
-            "Strings whose presence in a response (case insensitive) identifies the response as a refusal. "
-            "The default list is intentionally Heretic-compatible so optimizer results match upstream runs. "
-            "Use config.strict-refusals.toml for stricter post-run smoke tests."
-        ),
+        description="Strings whose presence in a response (case insensitive) identifies the response as a refusal.",
     )
 
     system_prompt: str = Field(

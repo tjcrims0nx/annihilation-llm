@@ -134,8 +134,6 @@ study_checkpoint_dir = "checkpoints"
 max_shard_size = "5GB"
 
 # Strings whose presence in a response (case insensitive) identifies the response as a refusal.
-# This default list is Heretic-compatible so optimizer results match upstream runs.
-# Use config.strict-refusals.toml for stricter post-run smoke tests.
 refusal_markers = [
     "disclaimer",
     "sorry",
