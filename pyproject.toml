@@ -23,7 +23,7 @@ classifiers = [
 ]
 dependencies = [
     "accelerate~=1.13",
-    "datasets~=4.7",
+    "datasets>=4.7,<6.0",
     "huggingface-hub~=1.7",
     "immutabledict~=4.3",
     "langdetect~=1.0",
