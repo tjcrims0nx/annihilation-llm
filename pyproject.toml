@@ -1,6 +1,6 @@
 [project]
 name = "annihilate-llm"
-version = "1.4.0"
+version = "1.4.1"
 description = "Fully automatic censorship removal for language models"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
