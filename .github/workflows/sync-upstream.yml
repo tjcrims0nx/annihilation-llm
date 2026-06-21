@@ -1,14 +1,11 @@
 name: Sync from upstream (heretic)
 
 on:
-  schedule:
-    # Check for upstream changes every 6 hours
-    - cron: "0 */6 * * *"
   workflow_dispatch:
 
 jobs:
   sync:
-    name: Copy upstream code to this repo
+    name: Copy upstream runtime into Annihilate package
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -26,19 +23,48 @@ jobs:
       - name: Fetch upstream
         run: git fetch upstream
 
-      - name: Determine upstream default branch
-        id: upstream-branch
+      - name: Sync upstream runtime files
         run: |
-          DEFAULT_BRANCH=$(git remote show upstream | grep 'HEAD branch' | awk '{print $NF}')
-          echo "branch=$DEFAULT_BRANCH" >> "$GITHUB_OUTPUT"
-
-      - name: Sync code from upstream
-        run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm -r --ignore-unmatch .
-          git checkout upstream/${{ steps.upstream-branch.outputs.branch }} -- .
-          git checkout HEAD -- .github .gitattributes README.md logo.jpeg pyproject.toml src/heretic/analyzer.py src/heretic/main.py src/heretic/model.py src/heretic/system.py src/heretic/utils.py
+
+          upstream_branch="$(git remote show upstream | awk '/HEAD branch/ {print $NF}')"
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+
+          git archive "upstream/${upstream_branch}" src/heretic config.default.toml config.nohumor.toml config.noslop.toml \
+            | tar -x -C "$tmpdir"
+
+          rm -rf src/annihilate
+          mkdir -p src
+          mv "$tmpdir/src/heretic" src/annihilate
+          cp "$tmpdir"/config*.toml .
+
+          # Keep this fork's public package identity, docs, GitHub automation,
+          # logo, and dependency lock intact. Upstream code is mapped into the
+          # Annihilate module namespace instead of reintroducing src/heretic.
+          rm -rf src/heretic
+
+          python - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              "heretic-llm": "annihilate-llm",
+              "Heretic": "Annihilate",
+              "heretic": "annihilate",
+              "https://heretic-project.org": "https://github.com/tjcrims0nx/annihilation-llm",
+              "https://github.com/p-e-w/heretic": "https://github.com/tjcrims0nx/annihilation-llm",
+          }
+
+          for path in Path("src/annihilate").rglob("*.py"):
+              text = path.read_text()
+              for old, new in replacements.items():
+                  text = text.replace(old, new)
+              path.write_text(text)
+          PY
+
+          git add -A
           if git diff --cached --quiet; then
             echo "No upstream changes to sync."
           else
