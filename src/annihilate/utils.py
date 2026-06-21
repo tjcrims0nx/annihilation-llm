@@ -119,10 +119,6 @@ def prompt_select(message: str, choices: list[Any]) -> Any:
         value = _choice_value(selected)
         print(f"[cyan]AUTO select[/] {message}: {auto}")
         return value
-    auto = _auto_pop_env("ANNIHILATE_AUTO_TEXTS")
-    if auto is not None:
-        print(f"[cyan]AUTO text[/] {message}: {auto}")
-        return auto if auto else default
     if is_notebook():
         print()
         print(message)

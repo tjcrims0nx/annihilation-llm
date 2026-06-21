@@ -63,13 +63,45 @@ python -m pip install -U annihilate-llm
 annihilate Qwen/Qwen3-4B-Instruct-2507
 ```
 
+### Updating
+
+Upgrade to the latest PyPI release inside your active virtual environment:
+
+```powershell
+# Windows PowerShell
+.\annihilation-env\Scripts\Activate.ps1
+python -m pip install --no-cache-dir -U annihilate-llm
+annihilate --help
+```
+
+```bash
+# macOS/Linux/Android terminal
+source annihilation-env/bin/activate
+python -m pip install --no-cache-dir -U annihilate-llm
+annihilate --help
+```
+
+If you are upgrading from `1.4.0` and still see errors that mention
+`annihilate.main`, force a clean reinstall so the console scripts and package
+layout are refreshed:
+
+```powershell
+python -m pip uninstall -y annihilate-llm
+python -m pip install --no-cache-dir -U annihilate-llm==1.4.1
+```
+
+`1.4.1` fixes the broken `bitsandbytes` dependency metadata from `1.4.0`, adds
+the tokenizer helper dependencies `sentencepiece` and `tiktoken`, restores the
+Annihilate banner, and prints a clear error when a GGUF repository is supplied.
+
 ### Requirements
 
 - **Python**: 3.10+
 - **PyTorch**: 2.2+ (hardware-specific installation required)
 - **Hardware**: GPU recommended (CUDA, ROCm, XPU, or MPS)
-- **Optional**: Install `annihilate-llm[bnb]` only on platforms
-  that support bitsandbytes if you want `bnb_4bit` quantization.
+- **Model format**: Use Transformers-compatible Hugging Face repositories with
+  safetensors or PyTorch weights. GGUF repositories are for llama.cpp-style
+  inference and cannot be abliterated with the PEFT/LoRA workflow.
 
 ### GPU Setup on Windows
 
