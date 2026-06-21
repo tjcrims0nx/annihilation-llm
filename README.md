@@ -168,7 +168,7 @@ annihilate --help
 ### Aggressive Optimization
 
 The default Annihilate run already uses the enhanced aggressive optimizer from
-upstream Heretic. It runs a multi-objective Optuna TPE search that minimizes
+upstream processing. It runs a multi-objective Optuna TPE search that minimizes
 both refusal count and KL divergence, using:
 
 - `n_trials = 200`

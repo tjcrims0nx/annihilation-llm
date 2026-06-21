@@ -28,7 +28,7 @@ def empty_cache():
 
     # Collecting garbage is not an idempotent operation, and to avoid OOM errors,
     # gc.collect() has to be called both before and after emptying the backend cache.
-    # See https://github.com/p-e-w/heretic/pull/17 for details.
+    # See https://github.com/tjcrims0nx/annihilation-llm/pull/17 for details.
     gc.collect()
 
     if torch.cuda.is_available():
@@ -59,46 +59,6 @@ def get_nvidia_driver_version() -> str | None:
         return output.strip().split("\n")[0]
     except (subprocess.CalledProcessError, FileNotFoundError, IndexError):
         return None
-
-
-def get_nvidia_smi_devices() -> list[dict[str, Any]]:
-    """Detects NVIDIA GPUs with nvidia-smi even if PyTorch cannot use CUDA."""
-
-    try:
-        output = subprocess.check_output(
-            [
-                "nvidia-smi",
-                "--query-gpu=name,memory.total,driver_version",
-                "--format=csv,noheader,nounits",
-            ],
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return []
-
-    devices = []
-    for line in output.strip().splitlines():
-        parts = [part.strip() for part in line.split(",")]
-        if not parts or not parts[0]:
-            continue
-
-        vram_gb = None
-        if len(parts) > 1:
-            try:
-                vram_gb = round(float(parts[1]) / 1024, 2)
-            except ValueError:
-                vram_gb = None
-
-        devices.append(
-            {
-                "name": parts[0],
-                "vram_gb": vram_gb,
-                "driver_version": parts[2] if len(parts) > 2 else None,
-            }
-        )
-
-    return devices
 
 
 def get_amdgpu_driver_version() -> str | None:
@@ -191,7 +151,7 @@ def get_mps_driver_version() -> str | None:
 
 
 @dataclass
-class HereticVersionInfo:
+class AnnihilateVersionInfo:
     """Detailed information about the annihilate-llm installation."""
 
     version: str
@@ -200,8 +160,8 @@ class HereticVersionInfo:
     metadata: dict[str, Any]
 
 
-def get_heretic_version_info() -> HereticVersionInfo:
-    """Detects version and installation source (PyPI, Git, Local)."""
+def get_annihilate_version_info() -> AnnihilateVersionInfo:
+    """Detects version and installation source (PyPI, Git, Local) of annihilate-llm."""
 
     package_name = "annihilate-llm"
     origin_metadata: dict[str, Any] = {"type": "unknown"}
@@ -219,7 +179,7 @@ def get_heretic_version_info() -> HereticVersionInfo:
         # Standard PyPI installation.
         origin_metadata["type"] = "pypi"
 
-        return HereticVersionInfo(
+        return AnnihilateVersionInfo(
             version=base_version,
             origin="PyPI",
             is_standard_pypi=True,
@@ -251,7 +211,7 @@ def get_heretic_version_info() -> HereticVersionInfo:
             }
         )
 
-        return HereticVersionInfo(
+        return AnnihilateVersionInfo(
             version=base_version,
             origin=origin_str,
             is_standard_pypi=False,
@@ -262,14 +222,14 @@ def get_heretic_version_info() -> HereticVersionInfo:
     if "url" in data and data["url"].startswith("file://"):
         origin_metadata["type"] = "local"
 
-        return HereticVersionInfo(
+        return AnnihilateVersionInfo(
             version=base_version,
             origin="Local",
             is_standard_pypi=False,
             metadata=origin_metadata,
         )
 
-    return HereticVersionInfo(
+    return AnnihilateVersionInfo(
         version=base_version,
         origin=None,
         is_standard_pypi=False,
@@ -302,21 +262,6 @@ def get_accelerator_info_dict() -> dict[str, Any]:
             info["devices"].append({"name": name, "vram_gb": round(vram, 2)})
 
         return info
-
-    nvidia_smi_devices = get_nvidia_smi_devices()
-    if nvidia_smi_devices:
-        return {
-            "type": "NVIDIA",
-            "api_name": "CUDA Version",
-            "api_version": torch.version.cuda,  # ty:ignore[unresolved-attribute]
-            "driver_version": nvidia_smi_devices[0].get("driver_version"),
-            "devices": nvidia_smi_devices,
-            "torch_available": False,
-            "warning": (
-                "NVIDIA GPU detected by nvidia-smi, but PyTorch CUDA is unavailable. "
-                "Install a CUDA-enabled PyTorch build in this Python environment."
-            ),
-        }
 
     if is_xpu_available():
         count = torch.xpu.device_count()  # ty:ignore[unresolved-attribute]
@@ -392,7 +337,7 @@ def get_accelerator_info(include_warnings: bool = True) -> str:
 
     devices = info["devices"]
     count = len(devices)
-    total_vram = sum(d.get("vram_gb") or 0 for d in devices)
+    total_vram = sum(d.get("vram_gb", 0) for d in devices)
 
     vram_suffix = f" ({total_vram:.2f} GB total VRAM)" if total_vram > 0 else ""
     report = f"Detected [bold]{count or 1}[/] {info['type']} device(s){vram_suffix}\n"
@@ -406,9 +351,6 @@ def get_accelerator_info(include_warnings: bool = True) -> str:
     for i, dev in enumerate(devices):
         vram = f" ({dev['vram_gb']:.2f} GB)" if dev.get("vram_gb") else ""
         report += f"* {info['type']} {i}: [bold]{dev['name']}[/]{vram}\n"
-
-    if info.get("warning") and include_warnings:
-        report += f"[bold yellow]{info['warning']}[/]\n"
 
     return report.strip()
 
@@ -479,17 +421,12 @@ def get_package_version(name: str) -> str:
 
 
 def get_requirements_dict() -> dict[str, str]:
-    """Recursively finds all direct and transitive dependencies and core libraries."""
+    """Recursively finds all direct and transitive dependencies of annihilate-llm and core libraries."""
 
-    # We start with this package and the core compute libraries.
-    # PyTorch is not listed as a dependency in the package
+    # We start with annihilate-llm and the core compute libraries.
+    # PyTorch is not listed as a dependency in the annihilate-llm package
     # because installation is hardware-specific and must be done manually.
-    packages_to_check = [
-        "annihilate-llm",
-        "torch",
-        "torchaudio",
-        "torchvision",
-    ]
+    packages_to_check = ["annihilate-llm", "torch", "torchaudio", "torchvision"]
 
     visited = set()
     required_packages = set()
@@ -527,16 +464,13 @@ def get_requirements_dict() -> dict[str, str]:
 
     # Lookup versions for all discovered packages.
     dependencies = {}
-    version_info = get_heretic_version_info()
+    version_info = get_annihilate_version_info()
 
     for package in required_packages_sorted:
-        # If this package was installed from source (Git/Local), exclude it
+        # If annihilate-llm was installed from source (Git/Local), exclude it
         # from requirements.txt to prevent pip from downloading an unrelated
         # version from PyPI during reproduction.
-        if (
-            package == "annihilate-llm"
-            and not version_info.is_standard_pypi
-        ):
+        if package == "annihilate-llm" and not version_info.is_standard_pypi:
             continue
 
         dependencies[package] = get_package_version(package)

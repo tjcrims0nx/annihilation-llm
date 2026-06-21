@@ -1,5 +1,5 @@
 # Rename this file to config.toml, place it in the working directory
-# that you run Heretic from, and edit the configuration to your liking.
+# that you run Annihilate from, and edit the configuration to your liking.
 
 max_response_length = 300
 

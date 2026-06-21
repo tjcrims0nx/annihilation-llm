@@ -118,7 +118,7 @@ class Settings(BaseSettings):
         default=None,
         description=(
             "If this directory path is set, then instead of abliterating a model, "
-            "download all reproduce.json files from public Heretic model repositories "
+            "download all reproduce.json files from public Annihilate model repositories "
             "on Hugging Face, and store them in that directory for archival purposes."
         ),
         exclude=True,
@@ -529,7 +529,7 @@ class Settings(BaseSettings):
                 cli_implicit_flags=True,
                 cli_kebab_case=True,
             ),
-            EnvSettingsSource(settings_cls, env_prefix="HERETIC_"),
+            EnvSettingsSource(settings_cls, env_prefix="ANNIHILATE_"),
             dotenv_settings,
             file_secret_settings,
             TomlConfigSettingsSource(settings_cls, toml_file="config.toml"),
