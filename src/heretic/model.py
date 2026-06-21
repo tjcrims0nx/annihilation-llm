@@ -36,6 +36,10 @@ from .system import empty_cache
 from .utils import Prompt, batchify, format_exception, print
 
 
+class UnsupportedModelFormatError(ValueError):
+    pass
+
+
 def get_model_class(
     model: str,
 ) -> Type[AutoModelForImageTextToText] | Type[AutoModelForCausalLM]:
@@ -45,6 +49,11 @@ def get_model_class(
         return AutoModelForImageTextToText
     else:
         return AutoModelForCausalLM
+
+
+def is_gguf_reference(model: str) -> bool:
+    normalized = model.lower()
+    return normalized.endswith(".gguf") or normalized.endswith("-gguf")
 
 
 @dataclass
@@ -73,6 +82,15 @@ class Model:
 
         print()
         print(f"Loading model [bold]{settings.model}[/]...")
+
+        if is_gguf_reference(settings.model):
+            raise UnsupportedModelFormatError(
+                "GGUF models are not supported by Annihilate. "
+                "Use the original Transformers/Hugging Face model repository "
+                "with safetensors or PyTorch weights instead. GGUF files are "
+                "for llama.cpp-style inference and cannot be abliterated with "
+                "the PEFT/LoRA workflow."
+            )
 
         self.tokenizer = AutoTokenizer.from_pretrained(
             settings.model,

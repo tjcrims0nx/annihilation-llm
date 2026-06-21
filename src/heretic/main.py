@@ -72,7 +72,12 @@ from rich.traceback import install
 from .analyzer import Analyzer
 from .config import ExportStrategy, QuantizationMethod
 from .evaluator import Evaluator
-from .model import AbliterationParameters, Model, get_model_class
+from .model import (
+    AbliterationParameters,
+    Model,
+    UnsupportedModelFormatError,
+    get_model_class,
+)
 from .reproduce import (
     check_environment,
     collect_reproducibles,
@@ -186,11 +191,11 @@ def run():
         os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
     package_version = version("annihilate-llm")
-    print(r"[purple]                  _ _     _ _       _       [/]")
-    print(r"[purple]  __ _ _ __  _ __ (_) |__ (_) | __ _| |_ ___ [/]")
-    print(r"[purple] / _` | '_ \| '_ \| | '_ \| | |/ _` | __/ _ \[/]")
-    print(r"[purple]| (_| | | | | | | | | | | | | | (_| | ||  __/[/]")
-    print(r"[purple] \__,_|_| |_|_| |_|_|_| |_|_|_|\__,_|\__\___|[/]")
+    print(r"[purple]                  _ __     _ __    _ __       __        [/]")
+    print(r"[purple]  ____ _____  ____  (_) /_  (_) /___ _/ /____   [/]")
+    print(r"[purple] / __ `/ __ \/ __ \/ / __ \/ / / __ `/ __/ _ \  [/]")
+    print(r"[purple]/ /_/ / / / / / / / / / / / / / /_/ / /_/  __/  [/]")
+    print(r"[purple]\__,_/_/ /_/_/ /_/_/_/ /_/_/_/\__,_/\__/\___/   [/]")
     print(
         f"[purple]annihilate[/] v{package_version}  [blue underline]https://github.com/tjcrims0nx/annihilation-llm[/]"
     )
@@ -381,7 +386,13 @@ def run():
         elif choice is None or choice == "":
             return
 
-    model = Model(settings)
+    try:
+        model = Model(settings)
+    except UnsupportedModelFormatError as error:
+        print()
+        print(f"[red]Error: {error}[/]")
+        return
+
     print()
     print_memory_usage()
 
