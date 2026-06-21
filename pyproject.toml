@@ -1,6 +1,6 @@
 [project]
 name = "annihilate-llm"
-version = "1.3.9"
+version = "1.4.0"
 description = "Fully automatic censorship removal for language models"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -23,7 +23,8 @@ classifiers = [
 ]
 dependencies = [
     "accelerate~=1.13",
-    "datasets>=4.7,<6.0",
+    "bitsandbytes~=0.49",
+    "datasets~=4.7",
     "huggingface-hub~=1.7",
     "immutabledict~=4.3",
     "langdetect~=1.0",
@@ -35,16 +36,13 @@ dependencies = [
     "py-cpuinfo~=9.0",
     "pydantic-settings~=2.13",
     "questionary~=2.1",
-    "rich>=14.3,<16.0",
+    "rich~=14.3",
     "tomli-w~=1.2",
     "tqdm~=4.67",
     "transformers[kernels]~=5.6",
 ]
 
 [project.optional-dependencies]
-bnb = [
-    "bitsandbytes~=0.49",
-]
 research = [
     "geom-median~=0.1",
     "imageio~=2.37",

@@ -148,7 +148,7 @@ class MismatchSeverity(IntEnum):
 
 def get_package_mismatch_severity(package_name: str) -> MismatchSeverity:
     if package_name in [
-        "heretic-llm",
+        "annihilate-llm",
     ]:
         return MismatchSeverity.CRITICAL
     elif package_name in [
@@ -283,19 +283,19 @@ def check_environment(reproduction_information: dict[str, Any]) -> bool:
             (
                 "[yellow]The provided JSON file does not contain system information. "
                 "Some system parameters can affect reproducibility, but due to the lack of system information, "
-                "Heretic is unable to verify that those parameters match the original environment. "
+                "Annihilate is unable to verify that those parameters match the original environment. "
                 "Reproduction may or may not produce a byte-for-byte identical model.[/]"
             )
         )
 
     requirements = get_requirements_dict()
-    requirements["heretic-llm"] = format_version_information(
+    requirements["annihilate-llm"] = format_version_information(
         asdict(get_heretic_version_info())
     )
     requirements["torch"] = torch.__version__
 
     original_requirements = reproduction_information["environment"]["requirements"]
-    original_requirements["heretic-llm"] = format_version_information(
+    original_requirements["annihilate-llm"] = format_version_information(
         reproduction_information["environment"]["heretic"]
     )
     original_requirements["torch"] = reproduction_information["environment"][

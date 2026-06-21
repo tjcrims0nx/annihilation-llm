@@ -118,7 +118,7 @@ class Settings(BaseSettings):
         default=None,
         description=(
             "If this directory path is set, then instead of abliterating a model, "
-            "download all reproduce.json files from public Heretic model repositories "
+            "download all reproduce.json files from public Annihilate model repositories "
             "on Hugging Face, and store them in that directory for archival purposes."
         ),
         exclude=True,
