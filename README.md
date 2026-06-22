@@ -87,12 +87,14 @@ layout are refreshed:
 
 ```powershell
 python -m pip uninstall -y annihilate-llm
-python -m pip install --no-cache-dir -U annihilate-llm==1.4.1
+python -m pip install --no-cache-dir -U annihilate-llm==1.4.2
 ```
 
-`1.4.1` fixes the broken `bitsandbytes` dependency metadata from `1.4.0`, adds
-the tokenizer helper dependencies `sentencepiece` and `tiktoken`, restores the
-Annihilate banner, and prints a clear error when a GGUF repository is supplied.
+`1.4.2` fixes the broken console script metadata from `1.4.1`, which could point
+the `annihilate` command at the old `heretic.main` module. It also keeps the
+`bitsandbytes` dependency fix from `1.4.1`, adds the tokenizer helper dependencies
+`sentencepiece` and `tiktoken`, restores the Annihilate banner, and prints a clear
+error when a GGUF repository is supplied.
 
 ### Requirements
 
