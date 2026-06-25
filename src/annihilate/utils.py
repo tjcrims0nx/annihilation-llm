@@ -34,8 +34,8 @@ from rich.console import Console
 from .config import DatasetSpecification, Settings
 from .system import (
     get_accelerator_info_dict,
-    get_cpu_info_dict,
     get_annihilate_version_info,
+    get_cpu_info_dict,
     get_python_env_info_dict,
     get_requirements_dict,
     is_xpu_available,
@@ -370,7 +370,9 @@ def get_readme_intro(
 
     return f"""# This is a decensored version of {
         model_link
-    }, made using [Annihilate](https://github.com/tjcrims0nx/annihilation-llm) v{version("annihilate-llm")}
+    }, made using [Annihilate](https://github.com/tjcrims0nx/annihilation-llm) v{
+        version("annihilate-llm")
+    }
 {reproducibility_instructions}
 ## Abliteration parameters
 

@@ -81,20 +81,49 @@ python -m pip install --no-cache-dir -U annihilate-llm
 annihilate --help
 ```
 
-If you are upgrading from `1.4.0` and still see errors that mention
-`annihilate.main`, force a clean reinstall so the console scripts and package
-layout are refreshed:
+### Repair or Uninstall
+
+If you get import errors, broken console scripts, stale `heretic.main` errors,
+or confusing pip error codes, run the repair helper from the same virtual
+environment. Use `python -m` so it still works when the `annihilate` command
+itself is broken.
+
+Show the current install, command shims, and exact repair commands:
 
 ```powershell
-python -m pip uninstall -y annihilate-llm
-python -m pip install --no-cache-dir -U annihilate-llm==1.4.2
+python -m annihilate.repair doctor
 ```
 
-`1.4.2` fixes the broken console script metadata from `1.4.1`, which could point
-the `annihilate` command at the old `heretic.main` module. It also keeps the
-`bitsandbytes` dependency fix from `1.4.1`, adds the tokenizer helper dependencies
-`sentencepiece` and `tiktoken`, restores the Annihilate banner, and prints a clear
-error when a GGUF repository is supplied.
+Clean reinstall Annihilate and remove old Heretic package names from the active
+environment:
+
+```powershell
+python -m annihilate.repair repair --yes
+```
+
+Fully uninstall Annihilate from the active environment:
+
+```powershell
+python -m annihilate.repair uninstall --yes
+```
+
+The installed package also exposes `annihilate-doctor`, `annihilate-repair`, and
+`annihilate-uninstall`, but `python -m annihilate.repair ...` is the safest form
+when command shims are stale or broken.
+
+### GitHub Package Bundle
+
+Release tags publish the Python wheel and source distribution to the GitHub
+Container Registry package `ghcr.io/tjcrims0nx/annihilate-llm`. The package
+bundle stores built artifacts under `/packages/` inside the image and replaces
+the old `annihilation-llm-tjcrims0nx` package name.
+
+`1.4.3` adds the repair/uninstall helpers. `1.4.2` fixed broken console script
+metadata from `1.4.1`, which could point the `annihilate` command at the old
+`heretic.main` module. These releases also keep the `bitsandbytes` dependency
+fix, add the tokenizer helper dependencies `sentencepiece` and `tiktoken`,
+restore the Annihilate banner, and print a clear error when a GGUF repository is
+supplied.
 
 ### Requirements
 
