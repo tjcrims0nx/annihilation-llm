@@ -2,10 +2,15 @@ $InstallDir = "$env:USERPROFILE\annihilation-llm"
 
 Write-Host "Uninstalling ANNIHILATE..." -ForegroundColor Cyan
 
-# Remove the directory
-if (Test-Path $InstallDir) {
-    Write-Host "Removing application folder ($InstallDir)..."
-    Remove-Item -Recurse -Force $InstallDir
+# Remove the virtual environments
+Write-Host "Removing Python environments..."
+$Envs = @("annihilation-env", ".venv", "venv", "env")
+foreach ($Env in $Envs) {
+    $EnvPath = "$InstallDir\$Env"
+    if (Test-Path $EnvPath) {
+        Write-Host "Deleting $EnvPath..."
+        Remove-Item -Recurse -Force $EnvPath
+    }
 }
 
 # Remove desktop shortcut

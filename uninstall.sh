@@ -5,10 +5,13 @@ INSTALL_DIR="$HOME/annihilation-llm"
 
 echo -e "\033[0;36mUninstalling ANNIHILATE...\033[0m"
 
-if [ -d "$INSTALL_DIR" ]; then
-    echo "Removing application folder ($INSTALL_DIR)..."
-    rm -rf "$INSTALL_DIR"
-fi
+echo "Removing Python environments..."
+for env in "annihilation-env" ".venv" "venv" "env"; do
+    if [ -d "$INSTALL_DIR/$env" ]; then
+        echo "Deleting $INSTALL_DIR/$env..."
+        rm -rf "$INSTALL_DIR/$env"
+    fi
+done
 
 echo -e "\033[0;33mDo you also want to clear downloaded HuggingFace Models? (This may free up gigabytes of space) [y/N]\033[0m"
 read -r response
