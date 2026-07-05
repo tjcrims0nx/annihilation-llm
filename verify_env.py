@@ -19,12 +19,12 @@ def main():
         needs_install = True
 
     if needs_reinstall:
-        cmd = ['uv', 'pip', 'install', 'torch', 'torchvision', 'torchaudio', '--index-url', 'https://download.pytorch.org/whl/cu121', '--reinstall']
+        cmd = ['uv', 'pip', 'install', '--python', sys.executable, 'torch', 'torchvision', 'torchaudio', '--index-url', 'https://download.pytorch.org/whl/cu121', '--reinstall']
         print(f"Running: {' '.join(cmd)}", flush=True)
         subprocess.run(cmd, check=True)
         print("CUDA PyTorch reinstallation complete.", flush=True)
     elif needs_install:
-        cmd = ['uv', 'pip', 'install', 'torch', 'torchvision', 'torchaudio']
+        cmd = ['uv', 'pip', 'install', '--python', sys.executable, 'torch', 'torchvision', 'torchaudio']
         if is_gpu:
             cmd.extend(['--index-url', 'https://download.pytorch.org/whl/cu121'])
         print(f"Running: {' '.join(cmd)}", flush=True)
