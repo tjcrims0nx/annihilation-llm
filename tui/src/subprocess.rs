@@ -34,6 +34,23 @@ fn repo_root() -> PathBuf {
 /// Get the path to the Python executable in the project venv.
 fn python_exe() -> PathBuf {
     let root = repo_root();
+    
+    // Check multiple common venv names
+    let venv_names = [".venv", "annihilation-env", "venv", "env"];
+    
+    for venv in venv_names.iter() {
+        let path = if cfg!(windows) {
+            root.join(venv).join("Scripts").join("python.exe")
+        } else {
+            root.join(venv).join("bin").join("python")
+        };
+        
+        if path.exists() {
+            return path;
+        }
+    }
+    
+    // Fallback if none exist (will likely crash on spawn, but we try the standard)
     if cfg!(windows) {
         root.join(".venv").join("Scripts").join("python.exe")
     } else {
