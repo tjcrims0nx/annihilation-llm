@@ -26,3 +26,14 @@ wheels/
 
 # Rust TUI build artifacts
 /tui/target/
+
+# Debug traces and test output
+trace*.txt
+trace*.log
+test_out.txt
+
+# Large model artifacts
+/cdn-artifacts/
+
+# Codex attachments
+/.codex-remote-attachments/

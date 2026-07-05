@@ -30,7 +30,7 @@ pub enum AppEvent {
 /// # Example
 ///
 /// ```rust,no_run
-/// use anntui::events::{EventHandler, AppEvent};
+/// use annihilate::events::{EventHandler, AppEvent};
 ///
 /// let events = EventHandler::new(250); // 250 ms tick
 ///

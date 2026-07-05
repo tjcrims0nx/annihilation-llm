@@ -1,5 +1,5 @@
 [package]
-name = "anntui"
+name = "annihilate"
 version = "0.1.0"
 edition = "2024"
 description = "Beautiful neon TUI frontend for Annihilation LLM"

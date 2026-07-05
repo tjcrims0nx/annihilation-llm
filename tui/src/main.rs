@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-//! ANNTUI - Beautiful neon TUI for Annihilation LLM
+//! ANNIHILATE - Beautiful neon TUI for Annihilation LLM
 //!
 //! A user-friendly terminal interface with selection menus,
 //! live dashboards, and dark neon aesthetics.

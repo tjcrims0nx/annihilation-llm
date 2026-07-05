@@ -14,7 +14,7 @@ use ratatui::{
     },
 };
 
-use crate::parser::{ParsedEvent, self};
+use crate::parser::ParsedEvent;
 use crate::subprocess::SubprocessManager;
 use crate::sysinfo::SystemInfo;
 use crate::theme;
@@ -284,7 +284,7 @@ impl App {
                             ParsedEvent::InteractivePrompt(prompt) => {
                                 self.log_lines.push((prompt, LogLevel::Warning));
                             }
-                            ParsedEvent::Raw(line) => {
+                            ParsedEvent::Raw(_line) => {
                                 // Handled by OutputLine below to avoid duplicates
                             }
                         },
@@ -1605,7 +1605,7 @@ impl App {
         let bar_area = Rect::new(area.x, area.y + area.height - 1, area.width, 1);
 
         let status_line = Line::from(vec![
-            Span::styled(" ANNTUI ", Style::default().fg(theme::BG_DARK).bg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)),
+            Span::styled(" ANNIHILATE ", Style::default().fg(theme::BG_DARK).bg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)),
             Span::styled(" ", theme::status_bar_style()),
             Span::styled(&self.status_message, theme::status_bar_style()),
             Span::styled(

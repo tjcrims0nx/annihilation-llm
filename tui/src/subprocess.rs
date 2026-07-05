@@ -12,11 +12,11 @@ use std::thread;
 use crate::parser::{self, ParsedEvent};
 
 /// Discover the repo root by walking up from the running binary.
-/// The binary lives at `<repo>/tui/target/{debug|release}/anntui`,
+/// The binary lives at `<repo>/tui/target/{debug|release}/annihilate`,
 /// so the repo root is 3 levels up. Falls back to the current working directory.
 fn repo_root() -> PathBuf {
     if let Ok(exe) = std::env::current_exe() {
-        // exe = <repo>/tui/target/debug/anntui(.exe)
+        // exe = <repo>/tui/target/debug/annihilate(.exe)
         if let Some(root) = exe.parent()   // target/debug/
             .and_then(|p| p.parent())       // target/
             .and_then(|p| p.parent())       // tui/
