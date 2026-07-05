@@ -100,10 +100,13 @@ class Model:
         # Multimodal models have a processor we'll want to save.
         self.processor = None
         if get_model_class(settings.model) == AutoModelForImageTextToText:
-            self.processor = AutoProcessor.from_pretrained(
-                settings.model,
-                **self.revision_kwargs,
-            )
+            try:
+                self.processor = AutoProcessor.from_pretrained(
+                    settings.model,
+                    **self.revision_kwargs,
+                )
+            except Exception as e:
+                print(f"[yellow]Warning: Failed to load processor for {settings.model}: {e}[/]")
 
         # Fallback for tokenizers that don't declare a special pad token.
         if self.tokenizer.pad_token is None:

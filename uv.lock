@@ -261,7 +261,7 @@ dev = [
 requires-dist = [
     { name = "accelerate", specifier = "~=1.13" },
     { name = "bitsandbytes", specifier = "~=0.49" },
-    { name = "datasets", specifier = "~=4.7" },
+    { name = "datasets", specifier = ">=4.7,<6.0" },
     { name = "geom-median", marker = "extra == 'research'", specifier = "~=0.1" },
     { name = "huggingface-hub", specifier = "~=1.7" },
     { name = "imageio", marker = "extra == 'research'", specifier = "~=2.37" },
@@ -277,7 +277,7 @@ requires-dist = [
     { name = "py-cpuinfo", specifier = "~=9.0" },
     { name = "pydantic-settings", specifier = "~=2.13" },
     { name = "questionary", specifier = "~=2.1" },
-    { name = "rich", specifier = "~=14.3" },
+    { name = "rich", specifier = ">=14.3,<16.0" },
     { name = "scikit-learn", marker = "extra == 'research'", specifier = "~=1.7" },
     { name = "sentencepiece", specifier = "~=0.2" },
     { name = "tiktoken", specifier = "~=0.12" },
