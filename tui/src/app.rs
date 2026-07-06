@@ -1302,7 +1302,7 @@ impl App {
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(theme::BORDER_ACTIVE))
             .title(Span::styled(" METRICS ", theme::title_style()))
-            .style(Style::default().bg(theme::BG_SURFACE));
+            .style(Style::default().bg(theme::BG_DARK));
 
         let metrics_inner = metrics_block.inner(left_chunks[1]);
         frame.render_widget(metrics_block, left_chunks[1]);
@@ -1342,7 +1342,11 @@ impl App {
         let ref_data: Vec<(f64, f64)> = self.refusal_history.iter().enumerate().map(|(i, &v)| (i as f64, v)).collect();
         
         if !self.kl_history.is_empty() {
-            let kl_max_y = self.kl_history.iter().cloned().fold(0.001f64, f64::max);
+            let kl_max_y = self.kl_history.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let kl_min_y = self.kl_history.iter().cloned().fold(f64::INFINITY, f64::min);
+            let kl_range = (kl_max_y - kl_min_y).max(0.0001);
+            let kl_bounds = [kl_min_y.max(0.0) - (kl_range * 0.1), kl_max_y + (kl_range * 0.1)];
+
             let kl_dataset = vec![
                 Dataset::default()
                     .marker(symbols::Marker::Braille)
@@ -1353,16 +1357,21 @@ impl App {
             let kl_chart = Chart::new(kl_dataset)
                 .block(Block::default()
                     .title(Span::styled(" KL Div ", theme::dim_style()))
-                    .style(Style::default().bg(theme::BG_SURFACE))
+                    .style(Style::default().bg(theme::BG_DARK))
                 )
                 .x_axis(Axis::default().bounds([0.0, max_x.max(1.0)]))
-                .y_axis(Axis::default().bounds([0.0, kl_max_y]))
+                .y_axis(Axis::default().bounds(kl_bounds))
                 .hidden_legend_constraints((Constraint::Percentage(100), Constraint::Percentage(100)));
             
             frame.render_widget(kl_chart, metric_lines[3]);
         }
 
         if !self.refusal_history.is_empty() {
+            let ref_max_y = self.refusal_history.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let ref_min_y = self.refusal_history.iter().cloned().fold(f64::INFINITY, f64::min);
+            let ref_range = (ref_max_y - ref_min_y).max(1.0);
+            let ref_bounds = [(ref_min_y - (ref_range * 0.1)).max(0.0), ref_max_y + (ref_range * 0.1)];
+
             let ref_dataset = vec![
                 Dataset::default()
                     .marker(symbols::Marker::Braille)
@@ -1373,10 +1382,10 @@ impl App {
             let ref_chart = Chart::new(ref_dataset)
                 .block(Block::default()
                     .title(Span::styled(" Refusals ", theme::dim_style()))
-                    .style(Style::default().bg(theme::BG_SURFACE))
+                    .style(Style::default().bg(theme::BG_DARK))
                 )
                 .x_axis(Axis::default().bounds([0.0, max_x.max(1.0)]))
-                .y_axis(Axis::default().bounds([0.0, 100.0]))
+                .y_axis(Axis::default().bounds(ref_bounds))
                 .hidden_legend_constraints((Constraint::Percentage(100), Constraint::Percentage(100)));
             
             frame.render_widget(ref_chart, metric_lines[5]);
