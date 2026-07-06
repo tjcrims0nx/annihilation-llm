@@ -35,7 +35,6 @@ impl SystemInfo {
         info
     }
 
-    /// Query nvidia-smi for GPU name, VRAM used, and VRAM total.
     pub fn refresh_gpu(&mut self) {
         let output = Command::new("nvidia-smi")
             .args([
@@ -54,33 +53,75 @@ impl SystemInfo {
                     self.gpu_name = parts[0].to_string();
                     self.vram_used_mb = parts[1].parse().unwrap_or(0.0);
                     self.vram_total_mb = parts[2].parse().unwrap_or(0.0);
+                    return;
                 }
             }
-        } else {
-            self.gpu_name = "No NVIDIA GPU detected".to_string();
+        }
+        
+        // Fallback to CPU detection
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(output) = Command::new("powershell").args(["-NoProfile", "-Command", "(Get-CimInstance Win32_Processor).Name"]).output() {
+                if output.status.success() {
+                    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    self.gpu_name = if name.is_empty() { "CPU (Unknown)".to_string() } else { format!("CPU: {}", name) };
+                } else {
+                    self.gpu_name = "CPU (Unknown)".to_string();
+                }
+            }
+        }
+        
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Ok(output) = Command::new("sh").args(["-c", "cat /proc/cpuinfo | grep -i 'model name' | head -n 1 | awk -F: '{print $2}' | xargs"]).output() {
+                if output.status.success() {
+                    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    self.gpu_name = if name.is_empty() { "CPU (Unknown)".to_string() } else { format!("CPU: {}", name) };
+                } else {
+                    self.gpu_name = "CPU (Unknown)".to_string();
+                }
+            }
         }
     }
 
-    /// Query system RAM usage via Windows wmic.
     pub fn refresh_ram(&mut self) {
-        // Try PowerShell-based approach (works on all modern Windows)
-        let output = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                "[math]::Round((Get-CimInstance Win32_OperatingSystem).TotalVisibleMemorySize/1024,0).ToString() + ',' + [math]::Round(((Get-CimInstance Win32_OperatingSystem).TotalVisibleMemorySize - (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory)/1024,0).ToString()",
-            ])
-            .output();
+        #[cfg(target_os = "windows")]
+        {
+            let output = Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    "[math]::Round((Get-CimInstance Win32_OperatingSystem).TotalVisibleMemorySize/1024,0).ToString() + ',' + [math]::Round(((Get-CimInstance Win32_OperatingSystem).TotalVisibleMemorySize - (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory)/1024,0).ToString()",
+                ])
+                .output();
 
-        if let Ok(output) = output
-            && output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let parts: Vec<&str> = stdout.trim().split(',').collect();
-                if parts.len() >= 2 {
-                    self.ram_total_mb = parts[0].parse().unwrap_or(0.0);
-                    self.ram_used_mb = parts[1].parse().unwrap_or(0.0);
+            if let Ok(output) = output
+                && output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let parts: Vec<&str> = stdout.trim().split(',').collect();
+                    if parts.len() >= 2 {
+                        self.ram_total_mb = parts[0].parse().unwrap_or(0.0);
+                        self.ram_used_mb = parts[1].parse().unwrap_or(0.0);
+                    }
                 }
-            }
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let output = Command::new("sh")
+                .args(["-c", "free -m | awk '/^Mem:/ {print $2 \",\" $3}'"])
+                .output();
+
+            if let Ok(output) = output
+                && output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let parts: Vec<&str> = stdout.trim().split(',').collect();
+                    if parts.len() >= 2 {
+                        self.ram_total_mb = parts[0].parse().unwrap_or(0.0);
+                        self.ram_used_mb = parts[1].parse().unwrap_or(0.0);
+                    }
+                }
+        }
     }
 
     /// Quick GPU refresh using nvidia-smi (just VRAM usage, faster).
