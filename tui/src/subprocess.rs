@@ -129,7 +129,7 @@ impl SubprocessManager {
             let mut c = Command::new("powershell");
             let gpu_arg = if is_gpu { "--gpu" } else { "" };
             c.arg("-Command");
-            c.arg(format!("if (-not (Test-Path '.venv') -and -not (Test-Path 'annihilation-env') -and -not (Test-Path 'venv') -and -not (Test-Path 'env')) {{ Write-Host 'First run detected: Creating annihilation-env virtual environment...'; python -m venv annihilation-env }}; $python = if (Test-Path 'annihilation-env') {{ '.\\annihilation-env\\Scripts\\python.exe' }} elseif (Test-Path '.venv') {{ '.\\.venv\\Scripts\\python.exe' }} elseif (Test-Path 'venv') {{ '.\\venv\\Scripts\\python.exe' }} else {{ '.\\env\\Scripts\\python.exe' }}; & $python -u verify_env.py {}", gpu_arg));
+            c.arg(format!("if (-not (Test-Path '.venv') -and -not (Test-Path 'annihilation-env') -and -not (Test-Path 'venv') -and -not (Test-Path 'env')) {{ Write-Output 'First run detected: Creating annihilation-env virtual environment...'; python -m venv annihilation-env; Write-Output 'Virtual environment created successfully.' }}; $python = if (Test-Path 'annihilation-env') {{ '.\\annihilation-env\\Scripts\\python.exe' }} elseif (Test-Path '.venv') {{ '.\\.venv\\Scripts\\python.exe' }} elseif (Test-Path 'venv') {{ '.\\venv\\Scripts\\python.exe' }} else {{ '.\\env\\Scripts\\python.exe' }}; & $python -u verify_env.py {}", gpu_arg));
             c
         } else {
             let mut c = Command::new("sh");
