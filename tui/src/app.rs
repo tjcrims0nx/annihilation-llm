@@ -110,6 +110,7 @@ pub struct App {
     // Model input
     pub model_input: String,
     pub model_cursor: usize,
+    pub model_error: Option<String>,
 
     // Processing state
     pub is_processing: bool,
@@ -178,6 +179,7 @@ impl App {
             current_menu: splash_menu,
             model_input: String::new(),
             model_cursor: 0,
+            model_error: None,
             is_processing: false,
             is_setting_up: false,
             subprocess: None,
@@ -341,7 +343,10 @@ impl App {
                     },
                     SubprocessMessage::OutputLine(line) => {
                         if !line.trim().is_empty() && !line.contains("Spawning") {
-                            let clean = crate::parser::strip_ansi(&line);
+                            let mut clean = crate::parser::strip_ansi(&line);
+                            if let Some(final_chunk) = clean.split('\r').last() {
+                                clean = final_chunk.to_string();
+                            }
                             if clean.contains("No GPU or other accelerator detected")
                                 && self.sys_info.gpu_name != "Unknown"
                             {
@@ -623,11 +628,16 @@ impl App {
         match key.code {
             KeyCode::Enter => {
                 if !self.model_input.is_empty() {
-                    self.check_and_start_processing();
+                    // Update status to show validating UI freeze
+                    self.status_message = "Validating model on HuggingFace...".to_string();
+                    if self.validate_model_input() {
+                        self.check_and_start_processing();
+                    }
                 }
             }
             KeyCode::Esc => {
                 self.screen = Screen::Setup;
+                self.model_error = None;
                 self.current_menu = vec![
                     MenuItem::new(
                         "Enter Model ID/Path",
@@ -641,10 +651,12 @@ impl App {
                 self.menu_state.select(Some(0));
             }
             KeyCode::Char(c) => {
+                self.model_error = None;
                 self.model_input.insert(self.model_cursor, c);
                 self.model_cursor += 1;
             }
             KeyCode::Backspace => {
+                self.model_error = None;
                 if self.model_cursor > 0 {
                     self.model_cursor -= 1;
                     self.model_input.remove(self.model_cursor);
@@ -664,6 +676,46 @@ impl App {
             KeyCode::End => self.model_cursor = self.model_input.len(),
             _ => {}
         }
+    }
+
+    fn validate_model_input(&mut self) -> bool {
+        self.model_error = None;
+        let model = self.model_input.trim();
+
+        // 1. Check if it's a local directory
+        let path = std::path::Path::new(model);
+        if path.exists() && path.is_dir() {
+            return true;
+        }
+
+        // 2. Validate HuggingFace repo via lightweight python subprocess
+        let script = format!(
+            "import urllib.request, sys\n\
+             try:\n\
+                 r = urllib.request.urlopen(f'https://huggingface.co/api/models/{{sys.argv[1]}}')\n\
+                 sys.exit(0 if r.getcode() == 200 else 1)\n\
+             except Exception:\n\
+                 sys.exit(1)"
+        );
+
+        let python = if cfg!(windows) { "python" } else { "python3" };
+        let output = std::process::Command::new(python)
+            .arg("-c")
+            .arg(&script)
+            .arg(model)
+            .output();
+
+        if let Ok(out) = output {
+            if out.status.success() {
+                return true;
+            }
+        }
+
+        self.model_error = Some(format!(
+            "Error: '{}' is not a local folder and was not found on HuggingFace Hub!",
+            model
+        ));
+        false
     }
 
     // ─── Config Select Keys ────────────────────────────────────
@@ -1441,6 +1493,17 @@ impl App {
         )))
         .alignment(Alignment::Center);
         frame.render_widget(sub, chunks[1]);
+
+        if let Some(ref err) = self.model_error {
+            let err_widget = Paragraph::new(Line::from(Span::styled(
+                err,
+                Style::default()
+                    .fg(theme::ERROR)
+                    .add_modifier(Modifier::BOLD),
+            )))
+            .alignment(Alignment::Center);
+            frame.render_widget(err_widget, chunks[2]);
+        }
 
         // Input field
         let input_width = 60.min(area.width.saturating_sub(4));
