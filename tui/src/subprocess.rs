@@ -159,10 +159,8 @@ impl SubprocessManager {
                     let tx_out = tx.clone();
                     thread::spawn(move || {
                         let reader = BufReader::new(stdout);
-                        for line in reader.lines() {
-                            if let Ok(text) = line {
-                                let _ = tx_out.send(SubprocessMessage::OutputLine(text));
-                            }
+                        for text in reader.lines().flatten() {
+                            let _ = tx_out.send(SubprocessMessage::OutputLine(text));
                         }
                     });
                 }
@@ -171,10 +169,8 @@ impl SubprocessManager {
                     let tx_err = tx.clone();
                     thread::spawn(move || {
                         let reader = BufReader::new(stderr);
-                        for line in reader.lines() {
-                            if let Ok(text) = line {
-                                let _ = tx_err.send(SubprocessMessage::OutputLine(text));
-                            }
+                        for text in reader.lines().flatten() {
+                            let _ = tx_err.send(SubprocessMessage::OutputLine(text));
                         }
                     });
                 }

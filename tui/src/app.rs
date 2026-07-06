@@ -214,8 +214,8 @@ impl App {
         self.glow_phase = (self.tick_count as f64 * 0.05).sin() * 0.5 + 0.5;
 
         // Process real subprocess events
-        if self.screen == Screen::Processing && self.is_processing {
-            if let Some(ref mut child) = self.subprocess {
+        if self.screen == Screen::Processing && self.is_processing
+            && let Some(ref mut child) = self.subprocess {
                 use crate::subprocess::SubprocessMessage;
                 let msgs = child.poll_messages();
 
@@ -359,7 +359,7 @@ impl App {
                 }
 
                 // Refresh real system stats periodically
-                if self.tick_count % 30 == 0 {
+                if self.tick_count.is_multiple_of(30) {
                     self.sys_info.refresh_gpu();
                     self.sys_info.refresh_ram();
                     // Fake tokens per sec since we can't easily parse that from output yet
@@ -367,7 +367,6 @@ impl App {
                     self.elapsed_secs += 1; // Roughly 1 second elapsed (at 30fps)
                 }
             }
-        }
     }
 
     fn generate_demo_results(&mut self) {
@@ -588,7 +587,7 @@ impl App {
                         self.total_trials = 200;
                         self.quantize = true;
                     }
-                    Some(4) | _ => {}
+                    _ => {}
                 }
                 self.go_back_to_splash();
                 self.status_message = if self.quantize {
@@ -691,7 +690,7 @@ impl App {
                     }
                     Some(3) => { /* Benchmarks */ }
                     Some(4) => { /* More trials */ }
-                    Some(5) | _ => {
+                    _ => {
                         self.switch_to_results();
                     }
                 }
@@ -956,7 +955,7 @@ impl App {
                         }
                         self.start_processing();
                     }
-                    Some(2) | _ => {
+                    _ => {
                         // Cancel - go back to Setup
                         self.go_back_to_splash();
                     }
@@ -1260,12 +1259,10 @@ impl App {
         frame.render_widget(input, input_area);
 
         // Show cursor
-        if !self.model_input.is_empty() || true {
-            let cursor_x = input_area.x + 1 + self.model_cursor as u16;
-            let cursor_y = input_area.y + 1;
-            if cursor_x < input_area.x + input_area.width - 1 {
-                frame.set_cursor_position((cursor_x, cursor_y));
-            }
+        let cursor_x = input_area.x + 1 + self.model_cursor as u16;
+        let cursor_y = input_area.y + 1;
+        if cursor_x < input_area.x + input_area.width - 1 {
+            frame.set_cursor_position((cursor_x, cursor_y));
         }
 
         // Hints
@@ -1592,8 +1589,7 @@ impl App {
 
         let rows: Vec<Row> = self.trials
             .iter()
-            .enumerate()
-            .map(|(_i, trial)| {
+            .map(|trial| {
                 let kl_color = if trial.kl_divergence > 0.5 {
                     theme::NEON_AMBER
                 } else if trial.kl_divergence > 0.1 {
