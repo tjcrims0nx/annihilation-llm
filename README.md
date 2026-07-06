@@ -47,6 +47,8 @@ Once running, monitor everything in real-time. The dashboard features dynamic sp
 Ensure you have **Python 3.10+** and **Rust** installed, and that your PyTorch installation supports CUDA (if you are using an NVIDIA GPU).
 
 ### Setup & Launch
+> ⚠️ **Note:** Windows support only right now!
+
 Just double-click the `start.bat` script in the root of the repository, or run it from the command line:
 ```powershell
 .\start.bat
