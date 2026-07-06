@@ -325,10 +325,18 @@ impl SubprocessManager {
         }
     }
 
-    /// Kill the subprocess.
+    /// Kill the subprocess and all its children.
     pub fn kill(&mut self) {
         if let Some(ref mut child) = self.child {
-            let _ = child.kill();
+            let pid = child.id();
+            if cfg!(windows) {
+                // Use taskkill /T to kill the process tree (preventing python/powershell zombies)
+                let _ = Command::new("taskkill")
+                    .args(["/F", "/T", "/PID", &pid.to_string()])
+                    .output();
+            } else {
+                let _ = child.kill();
+            }
         }
     }
 
