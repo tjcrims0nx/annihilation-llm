@@ -12,6 +12,8 @@
 
 ---
 
+> ⚠️ **Note:** Windows is fully supported out of the box. Linux support is currently **under active development** and you may encounter bugs or require manual environment setup (like installing correct GPU drivers).
+
 ## 🔥 What is Annihilation?
 
 **Annihilation** is a fully automatic framework designed to remove censorship (safety alignment) from transformer-based language models. By using advanced parametric directional ablation and TPE-based optimization, it autonomously finds the absolute best parameters to decensor your models without requiring any expensive post-training.
