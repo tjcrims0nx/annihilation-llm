@@ -1754,7 +1754,7 @@ impl App {
             Span::styled(&self.status_message, theme::status_bar_style()),
             Span::styled(
                 format!("{}v0.1.0 ",
-                    " ".repeat(area.width as usize - self.status_message.len() - 16)),
+                    " ".repeat((area.width as usize).saturating_sub(self.status_message.len() + 20))),
                 theme::status_bar_style(),
             ),
         ]);
