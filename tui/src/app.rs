@@ -11,7 +11,9 @@ use ratatui::{
     text::{Line, Span},
     widgets::{
         Block, BorderType, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Wrap,
+        Chart, Dataset, GraphType, Axis,
     },
+    symbols,
 };
 
 use crate::parser::ParsedEvent;
@@ -1202,7 +1204,7 @@ impl App {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(7),   // header + progress
-                Constraint::Length(8),   // metrics
+                Constraint::Length(12),  // metrics
                 Constraint::Min(5),      // log
             ])
             .split(main_chunks[0]);
@@ -1286,11 +1288,12 @@ impl App {
         let metric_lines = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Min(0),
+                Constraint::Length(1), // Refusal text
+                Constraint::Length(1), // KL text
+                Constraint::Length(1), // Spacer
+                Constraint::Length(3), // KL Chart
+                Constraint::Length(1), // Spacer
+                Constraint::Min(3),    // Ref Chart
             ])
             .split(metrics_inner);
 
@@ -1311,22 +1314,44 @@ impl App {
         frame.render_widget(Paragraph::new(refusal_line), metric_lines[0]);
         frame.render_widget(Paragraph::new(kl_line), metric_lines[1]);
 
-        // Mini sparklines (text-based)
+        // Draw Line Charts ("hills") instead of solid bars
+        let max_x = self.total_trials as f64;
+        let kl_data: Vec<(f64, f64)> = self.kl_history.iter().enumerate().map(|(i, &v)| (i as f64, v)).collect();
+        let ref_data: Vec<(f64, f64)> = self.refusal_history.iter().enumerate().map(|(i, &v)| (i as f64, v)).collect();
+        
         if !self.kl_history.is_empty() {
-            let sparkline_str = text_sparkline(&self.kl_history, 30);
-            let spark_line = Line::from(vec![
-                Span::styled(" KL:  ", theme::dim_style()),
-                Span::styled(&sparkline_str, Style::default().fg(theme::NEON_CYAN)),
-            ]);
-            frame.render_widget(Paragraph::new(spark_line), metric_lines[2]);
+            let kl_max_y = self.kl_history.iter().cloned().fold(0.001f64, f64::max);
+            let kl_dataset = vec![
+                Dataset::default()
+                    .marker(symbols::Marker::Braille)
+                    .graph_type(GraphType::Line)
+                    .style(Style::default().fg(theme::NEON_CYAN))
+                    .data(&kl_data)
+            ];
+            let kl_chart = Chart::new(kl_dataset)
+                .block(Block::default().title(Span::styled(" KL Div ", theme::dim_style())))
+                .x_axis(Axis::default().bounds([0.0, max_x.max(1.0)]))
+                .y_axis(Axis::default().bounds([0.0, kl_max_y]))
+                .hidden_legend_constraints((Constraint::Percentage(100), Constraint::Percentage(100)));
+            
+            frame.render_widget(kl_chart, metric_lines[3]);
         }
+
         if !self.refusal_history.is_empty() {
-            let sparkline_str = text_sparkline(&self.refusal_history, 30);
-            let spark_line = Line::from(vec![
-                Span::styled(" Ref: ", theme::dim_style()),
-                Span::styled(&sparkline_str, Style::default().fg(theme::NEON_GREEN)),
-            ]);
-            frame.render_widget(Paragraph::new(spark_line), metric_lines[3]);
+            let ref_dataset = vec![
+                Dataset::default()
+                    .marker(symbols::Marker::Braille)
+                    .graph_type(GraphType::Line)
+                    .style(Style::default().fg(theme::NEON_GREEN))
+                    .data(&ref_data)
+            ];
+            let ref_chart = Chart::new(ref_dataset)
+                .block(Block::default().title(Span::styled(" Refusals ", theme::dim_style())))
+                .x_axis(Axis::default().bounds([0.0, max_x.max(1.0)]))
+                .y_axis(Axis::default().bounds([0.0, 100.0]))
+                .hidden_legend_constraints((Constraint::Percentage(100), Constraint::Percentage(100)));
+            
+            frame.render_widget(ref_chart, metric_lines[5]);
         }
 
         // ── Log Panel ──

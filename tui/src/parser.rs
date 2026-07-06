@@ -106,23 +106,7 @@ pub fn parse_line(raw: &str) -> ParsedEvent {
     // Optimization starting
     if line.contains("Running") && line.contains("trial") {
         // "Running trial 5 of 200"
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        for (i, &word) in parts.iter().enumerate() {
-            if word == "trial" && i + 3 < parts.len() {
-                if let (Ok(current), Ok(total)) = (
-                    parts[i + 1].parse::<usize>(),
-                    parts[i + 3].parse::<usize>(),
-                ) {
-                    return ParsedEvent::TrialComplete {
-                        trial_number: current,
-                        total_trials: total,
-                        refusals: 0,
-                        total_prompts: 0,
-                        kl_divergence: 0.0,
-                    };
-                }
-            }
-        }
+        return ParsedEvent::Status(line.to_string());
     }
 
     // Trial results - look for refusal counts and KL divergence
