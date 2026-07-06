@@ -106,7 +106,9 @@ class Model:
                     **self.revision_kwargs,
                 )
             except Exception as e:
-                print(f"[yellow]Warning: Failed to load processor for {settings.model}: {e}[/]")
+                print(
+                    f"[yellow]Warning: Failed to load processor for {settings.model}: {e}[/]"
+                )
 
         # Fallback for tokenizers that don't declare a special pad token.
         if self.tokenizer.pad_token is None:
