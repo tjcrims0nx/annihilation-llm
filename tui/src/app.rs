@@ -1351,7 +1351,10 @@ impl App {
                     .data(&kl_data)
             ];
             let kl_chart = Chart::new(kl_dataset)
-                .block(Block::default().title(Span::styled(" KL Div ", theme::dim_style())))
+                .block(Block::default()
+                    .title(Span::styled(" KL Div ", theme::dim_style()))
+                    .style(Style::default().bg(theme::BG_SURFACE))
+                )
                 .x_axis(Axis::default().bounds([0.0, max_x.max(1.0)]))
                 .y_axis(Axis::default().bounds([0.0, kl_max_y]))
                 .hidden_legend_constraints((Constraint::Percentage(100), Constraint::Percentage(100)));
@@ -1368,7 +1371,10 @@ impl App {
                     .data(&ref_data)
             ];
             let ref_chart = Chart::new(ref_dataset)
-                .block(Block::default().title(Span::styled(" Refusals ", theme::dim_style())))
+                .block(Block::default()
+                    .title(Span::styled(" Refusals ", theme::dim_style()))
+                    .style(Style::default().bg(theme::BG_SURFACE))
+                )
                 .x_axis(Axis::default().bounds([0.0, max_x.max(1.0)]))
                 .y_axis(Axis::default().bounds([0.0, 100.0]))
                 .hidden_legend_constraints((Constraint::Percentage(100), Constraint::Percentage(100)));
