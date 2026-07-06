@@ -17,7 +17,7 @@ use app::App;
 use color_eyre::Result;
 use crossterm::{
     ExecutableCommand,
-    event::{DisableMouseCapture, EnableMouseCapture},
+    event::{DisableMouseCapture, EnableMouseCapture, EnableBracketedPaste, DisableBracketedPaste},
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use events::{AppEvent, EventHandler};
@@ -31,6 +31,7 @@ fn main() -> Result<()> {
     enable_raw_mode()?;
     io::stdout().execute(EnterAlternateScreen)?;
     io::stdout().execute(crossterm::cursor::Hide)?;
+    io::stdout().execute(EnableBracketedPaste)?;
     io::stdout().execute(EnableMouseCapture)?;
     io::stdout().execute(crossterm::terminal::Clear(
         crossterm::terminal::ClearType::All,
@@ -45,6 +46,7 @@ fn main() -> Result<()> {
 
     // Restore terminal
     disable_raw_mode()?;
+    io::stdout().execute(DisableBracketedPaste)?;
     io::stdout().execute(LeaveAlternateScreen)?;
     io::stdout().execute(DisableMouseCapture)?;
     io::stdout().execute(crossterm::cursor::Show)?;
@@ -66,6 +68,9 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
                 if app.handle_key(key) {
                     break; // App wants to quit
                 }
+            }
+            AppEvent::Paste(text) => {
+                app.handle_paste(text);
             }
             AppEvent::Mouse(mouse) => {
                 app.handle_mouse(mouse);

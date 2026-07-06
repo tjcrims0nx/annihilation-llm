@@ -626,6 +626,13 @@ impl App {
 
     fn handle_model_input_key(&mut self, key: KeyEvent) {
         match key.code {
+            KeyCode::Char('v') | KeyCode::Char('V') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Ok(text) = clipboard.get_text() {
+                        self.handle_paste(text);
+                    }
+                }
+            }
             KeyCode::Enter => {
                 if !self.model_input.is_empty() {
                     // Update status to show validating UI freeze
@@ -716,6 +723,17 @@ impl App {
             model
         ));
         false
+    }
+    pub fn handle_paste(&mut self, text: String) {
+        if self.screen == Screen::ModelInput {
+            // Strip out newlines so we don't accidentally execute or break the input field
+            let clean = text.replace('\n', "").replace('\r', "");
+            self.model_error = None;
+            for c in clean.chars() {
+                self.model_input.insert(self.model_cursor, c);
+                self.model_cursor += 1;
+            }
+        }
     }
 
     // ─── Config Select Keys ────────────────────────────────────

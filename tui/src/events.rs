@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 use color_eyre::Result;
-use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyEvent, KeyEventKind, MouseEvent};
 
 /// Application-level events consumed by the main loop.
 #[derive(Debug)]
@@ -18,7 +18,10 @@ pub enum AppEvent {
     Key(KeyEvent),
 
     /// A mouse event was received.
-    Mouse(crossterm::event::MouseEvent),
+    Mouse(MouseEvent),
+
+    /// Paste event received.
+    Paste(String),
 
     /// No meaningful event arrived within the tick window – use this to
     /// drive animations, status refreshes, and other periodic work.
@@ -41,6 +44,7 @@ pub enum AppEvent {
 ///     match events.next().unwrap() {
 ///         AppEvent::Key(key) => { /* handle input */ }
 ///         AppEvent::Mouse(mouse) => { /* handle mouse */ }
+///         AppEvent::Paste(text) => { /* handle paste */ }
 ///         AppEvent::Tick      => { /* update state */ }
 ///         AppEvent::Resize(..) => { /* redraw */ }
 ///     }
@@ -63,12 +67,14 @@ impl EventHandler {
     ///
     /// * If a key press arrives → [`AppEvent::Key`]
     /// * If a mouse event arrives → [`AppEvent::Mouse`]
+    /// * If pasted text arrives → [`AppEvent::Paste`]
     /// * If the terminal is resized → [`AppEvent::Resize`]
     /// * Otherwise (timeout **or** unhandled event) → [`AppEvent::Tick`]
     pub fn next(&self) -> Result<AppEvent> {
         if event::poll(self.tick_rate)? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => Ok(AppEvent::Key(key)),
+                Event::Paste(text) => Ok(AppEvent::Paste(text)),
                 Event::Mouse(mouse) => Ok(AppEvent::Mouse(mouse)),
                 Event::Resize(w, h) => Ok(AppEvent::Resize(w, h)),
                 _ => Ok(AppEvent::Tick),

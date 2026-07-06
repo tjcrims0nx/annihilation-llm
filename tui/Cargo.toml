@@ -10,3 +10,4 @@ crossterm = { version = "0.28", features = ["event-stream"] }
 tokio = { version = "1", features = ["full"] }
 color-eyre = "0.6"
 unicode-width = "0.2"
+arboard = "3.6.1"
