@@ -353,7 +353,7 @@ impl App {
                                             LogLevel::Error
                                         ));
                                     self.log_lines.push((
-                                            "FIX THIS BY RUNNING: `uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121 --upgrade`".to_string(),
+                                            "FIX THIS BY RUNNING: `uv pip install --python annihilation-env torch torchvision --index-url https://download.pytorch.org/whl/cu121 --upgrade`".to_string(),
                                             LogLevel::Error
                                         ));
                                 }
