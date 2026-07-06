@@ -11,7 +11,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{
         Block, BorderType, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Wrap,
-        Chart, Dataset, GraphType, Axis,
+        Chart, Dataset, GraphType, Axis, Table, Row, Cell, TableState,
     },
     symbols,
 };
@@ -106,6 +106,7 @@ pub struct App {
     // Menu state
     pub menu_state: ListState,
     pub current_menu: Vec<MenuItem>,
+    pub trial_list_state: TableState,
 
     // Model input
     pub model_input: String,
@@ -133,7 +134,6 @@ pub struct App {
 
     // Results state
     pub trials: Vec<TrialResult>,
-    pub trial_list_state: ListState,
 
     // Chat state
     pub chat_messages: Vec<(String, String)>, // (role, content)
@@ -197,7 +197,7 @@ impl App {
             kl_history: Vec::new(),
             refusal_history: Vec::new(),
             trials: Vec::new(),
-            trial_list_state: ListState::default(),
+            trial_list_state: TableState::default(),
             chat_messages: Vec::new(),
             chat_input: String::new(),
             chat_scroll: 0,
@@ -1552,21 +1552,14 @@ impl App {
         let trial_area = centered_rect_fixed(trial_width, chunks[2].height, chunks[2]);
 
         // Header
-        let header = Line::from(vec![
-            Span::styled("    ", Style::default()),
-            Span::styled(
-                format!("{:<8}{:<12}{:<14}{:<12}", "Trial", "Refusals", "KL Div", "Direction"),
-                Style::default().fg(theme::NEON_PURPLE).add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-            ),
-        ]);
+        let header = Row::new(vec!["Trial", "Refusals", "KL Div", "Direction"])
+            .style(Style::default().fg(theme::NEON_PURPLE).add_modifier(Modifier::BOLD | Modifier::UNDERLINED))
+            .bottom_margin(1);
 
-        let items: Vec<ListItem> = self.trials
+        let rows: Vec<Row> = self.trials
             .iter()
             .enumerate()
-            .map(|(i, trial)| {
-                let is_selected = self.trial_list_state.selected() == Some(i);
-                let prefix = if is_selected { " ▸ " } else { "   " };
-
+            .map(|(_i, trial)| {
                 let kl_color = if trial.kl_divergence > 0.5 {
                     theme::NEON_AMBER
                 } else if trial.kl_divergence > 0.1 {
@@ -1583,55 +1576,39 @@ impl App {
                     theme::NEON_AMBER
                 };
 
-                let line = Line::from(vec![
-                    Span::styled(prefix, if is_selected {
-                        Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)
-                    } else {
-                        theme::dim_style()
-                    }),
-                    Span::styled(
-                        format!("{:<8}", trial.index),
-                        if is_selected { theme::highlight_value() } else { Style::default().fg(theme::TEXT_PRIMARY) },
-                    ),
-                    Span::styled(
-                        format!("{}/{:<7}", trial.refusals, trial.total_prompts),
-                        Style::default().fg(refusal_color),
-                    ),
-                    Span::styled("  ", Style::default()),
-                    Span::styled(
-                        format!("{:<14.4}", trial.kl_divergence),
-                        Style::default().fg(kl_color),
-                    ),
-                    Span::styled(
-                        &trial.direction,
-                        if is_selected {
-                            Style::default().fg(theme::NEON_PURPLE)
-                        } else {
-                            theme::dim_style()
-                        },
-                    ),
-                ]);
-
-                ListItem::new(line)
+                Row::new(vec![
+                    Cell::from(format!("{}", trial.index)),
+                    Cell::from(format!("{}/{}", trial.refusals, trial.total_prompts)).style(Style::default().fg(refusal_color)),
+                    Cell::from(format!("{:.4}", trial.kl_divergence)).style(Style::default().fg(kl_color)),
+                    Cell::from(trial.direction.clone()).style(theme::dim_style()),
+                ])
             })
             .collect();
 
-        let trial_list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(theme::BORDER_ACTIVE))
-                    .title(Span::styled(" Pareto Optimal Trials ", theme::title_style()))
-                    .style(Style::default().bg(theme::BG_SURFACE)),
-            );
+        let trial_table = Table::new(rows, [
+            Constraint::Length(10), // Trial
+            Constraint::Length(15), // Refusals
+            Constraint::Length(15), // KL Div
+            Constraint::Min(20),    // Direction
+        ])
+        .header(header)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(theme::BORDER_ACTIVE))
+                .title(Span::styled(" Pareto Optimal Trials ", theme::title_style()))
+                .style(Style::default().bg(theme::BG_SURFACE))
+        )
+        .row_highlight_style(
+            Style::default()
+                .bg(theme::BG_DARK)
+                .fg(theme::NEON_CYAN)
+                .add_modifier(Modifier::BOLD)
+        )
+        .highlight_symbol(" ▸ ");
 
-        // Render header manually
-        let header_area = Rect::new(trial_area.x + 1, trial_area.y + 1, trial_area.width - 2, 1);
-        frame.render_widget(Paragraph::new(header), header_area);
-
-        let list_area = Rect::new(trial_area.x, trial_area.y + 1, trial_area.width, trial_area.height - 1);
-        frame.render_stateful_widget(trial_list, list_area, &mut self.trial_list_state);
+        frame.render_stateful_widget(trial_table, trial_area, &mut self.trial_list_state);
 
         // Hints
         let hints = Paragraph::new(Line::from(vec![
