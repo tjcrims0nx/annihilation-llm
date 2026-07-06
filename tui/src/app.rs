@@ -710,28 +710,20 @@ impl App {
             return true;
         }
 
-        // 2. Validate HuggingFace repo via lightweight python subprocess
+        // 2. Validate HuggingFace repo via curl HTTP check
         // We accept HTTP 200 (public) and HTTP 401 (gated/private) as valid existence indicators.
-        let script = format!(
-            "import urllib.request, urllib.error, sys\n\
-             try:\n\
-                 r = urllib.request.urlopen(f'https://huggingface.co/api/models/{{sys.argv[1]}}')\n\
-                 sys.exit(0)\n\
-             except urllib.error.HTTPError as e:\n\
-                 sys.exit(0 if e.code == 401 else 1)\n\
-             except Exception:\n\
-                 sys.exit(1)"
-        );
-
-        let python = if cfg!(windows) { "python" } else { "python3" };
-        let output = std::process::Command::new(python)
-            .arg("-c")
-            .arg(&script)
-            .arg(model)
+        // We use curl because it avoids python SSL certificate issues common in WSL, and is native to Win10+/Linux/Mac.
+        let dev_null = if cfg!(windows) { "NUL" } else { "/dev/null" };
+        let url = format!("https://huggingface.co/api/models/{}", model);
+        
+        let output = std::process::Command::new("curl")
+            .args(["-s", "-o", dev_null, "-w", "%{http_code}", &url])
             .output();
 
         if let Ok(out) = output {
-            if out.status.success() {
+            let code_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            // Allow 200 OK or 401 Unauthorized (gated repo)
+            if code_str == "200" || code_str == "401" {
                 return true;
             }
         }
