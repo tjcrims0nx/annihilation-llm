@@ -373,7 +373,11 @@ def run():
         )
 
         print()
-        choice = prompt_select("How would you like to proceed?", choices)
+        if os.environ.get("ANNIHILATE_AUTO_CONTINUE") == "1":
+            print("[cyan]AUTO select[/] How would you like to proceed?: continue")
+            choice = "continue"
+        else:
+            choice = prompt_select("How would you like to proceed?", choices)
 
         if choice == "continue":
             settings = Settings.model_validate_json(
