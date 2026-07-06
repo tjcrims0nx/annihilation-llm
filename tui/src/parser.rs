@@ -22,8 +22,8 @@ pub enum ParsedEvent {
         total_trials: usize,
         refusals: usize,
         total_prompts: usize,
-        kl_divergence: f64,
     },
+    KLDivergence(f64),
     /// Best trial so far updated
     BestTrial {
         trial_number: usize,
@@ -113,14 +113,12 @@ pub fn parse_line(raw: &str) -> ParsedEvent {
     // Patterns: "Refusals: X/Y" or "refusals: X" or "KL divergence: X.XXXX"
     if line.contains("efusal") && (line.contains('/') || line.contains(':')) {
         let refusals = extract_fraction(&line, "efusal");
-        let kl = extract_float_after(&line, "KL");
         if let Some((num, denom)) = refusals {
             return ParsedEvent::TrialComplete {
                 trial_number: 0, // Will be updated by context
                 total_trials: 0,
                 refusals: num,
                 total_prompts: denom,
-                kl_divergence: kl.unwrap_or(0.0),
             };
         }
     }
@@ -128,7 +126,7 @@ pub fn parse_line(raw: &str) -> ParsedEvent {
     // KL divergence standalone
     if line.contains("KL divergence") || line.contains("kl_divergence") {
         if let Some(kl) = extract_float_after(&line, "KL") {
-            return ParsedEvent::Status(format!("KL divergence: {:.4}", kl));
+            return ParsedEvent::KLDivergence(kl);
         }
     }
 

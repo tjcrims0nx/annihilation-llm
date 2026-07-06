@@ -119,6 +119,7 @@ pub struct App {
     pub total_trials: usize,
     pub best_refusals: Option<usize>,
     pub best_kl: Option<f64>,
+    pub pending_kl: Option<f64>,
     pub log_lines: Vec<(String, LogLevel)>,
     pub log_scroll: usize,
     pub log_auto_scroll: bool,
@@ -184,6 +185,7 @@ impl App {
             total_trials: 200,
             best_refusals: None,
             best_kl: None,
+            pending_kl: None,
             log_lines: Vec::new(),
             log_scroll: 0,
             log_auto_scroll: true,
@@ -230,6 +232,9 @@ impl App {
                             ParsedEvent::DatasetLoading(msg) => {
                                 self.log_lines.push((msg, LogLevel::Dim));
                             }
+                            ParsedEvent::KLDivergence(kl) => {
+                                self.pending_kl = Some(kl);
+                            }
                             ParsedEvent::CalculatingDirections => {
                                 self.log_lines.push(("Calculating per-layer refusal directions...".into(), LogLevel::Info));
                             }
@@ -237,13 +242,14 @@ impl App {
                                 self.total_trials = n_trials;
                                 self.log_lines.push(("Starting optimization...".into(), LogLevel::Success));
                             }
-                            ParsedEvent::TrialComplete { trial_number, total_trials: _, refusals, total_prompts, kl_divergence } => {
+                            ParsedEvent::TrialComplete { trial_number, total_trials: _, refusals, total_prompts } => {
                                 if trial_number > 0 {
                                     self.current_trial = trial_number;
                                 } else {
                                     self.current_trial += 1; // Fallback if we couldn't parse the exact number
                                 }
 
+                                let kl_divergence = self.pending_kl.take().unwrap_or(0.0);
                                 self.kl_history.push(kl_divergence);
                                 self.refusal_history.push(refusals as f64);
 
