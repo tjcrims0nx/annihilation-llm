@@ -630,7 +630,22 @@ impl App {
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                     if let Ok(text) = clipboard.get_text() {
                         self.handle_paste(text);
+                    } else {
+                        self.model_error = Some("Failed to get text from clipboard!".to_string());
                     }
+                } else {
+                    self.model_error = Some("Host clipboard not accessible here! Use Ctrl+Shift+V or Right-Click instead.".to_string());
+                }
+            }
+            KeyCode::Insert if key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) => {
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Ok(text) = clipboard.get_text() {
+                        self.handle_paste(text);
+                    } else {
+                        self.model_error = Some("Failed to get text from clipboard!".to_string());
+                    }
+                } else {
+                    self.model_error = Some("Host clipboard not accessible here! Use Ctrl+Shift+V or Right-Click instead.".to_string());
                 }
             }
             KeyCode::Enter => {
