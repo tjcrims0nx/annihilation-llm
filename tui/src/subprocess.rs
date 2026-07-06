@@ -59,8 +59,6 @@ fn python_exe() -> PathBuf {
 pub enum SubprocessMessage {
     /// A parsed event from stdout/stderr
     Event(ParsedEvent),
-    /// Raw output line (for the log panel)
-    OutputLine(String),
     /// Process exited with code
     Exited(Option<i32>),
     /// Process failed to start
@@ -119,7 +117,8 @@ impl SubprocessManager {
                     thread::spawn(move || {
                         let reader = BufReader::new(stdout);
                         for text in reader.lines().flatten() {
-                            let _ = tx_out.send(SubprocessMessage::OutputLine(text));
+                            let event = parser::parse_line(&text);
+                            let _ = tx_out.send(SubprocessMessage::Event(event));
                         }
                     });
                 }
@@ -129,7 +128,8 @@ impl SubprocessManager {
                     thread::spawn(move || {
                         let reader = BufReader::new(stderr);
                         for text in reader.lines().flatten() {
-                            let _ = tx_err.send(SubprocessMessage::OutputLine(text));
+                            let event = parser::parse_line(&text);
+                            let _ = tx_err.send(SubprocessMessage::Event(event));
                         }
                     });
                 }
@@ -202,7 +202,6 @@ impl SubprocessManager {
                                 Ok(text) => {
                                     let event = parser::parse_line(&text);
                                     let _ = tx_out.send(SubprocessMessage::Event(event));
-                                    let _ = tx_out.send(SubprocessMessage::OutputLine(text));
                                 }
                                 Err(_) => break,
                             }
@@ -220,7 +219,6 @@ impl SubprocessManager {
                                 Ok(text) => {
                                     let event = parser::parse_line(&text);
                                     let _ = tx_err.send(SubprocessMessage::Event(event));
-                                    let _ = tx_err.send(SubprocessMessage::OutputLine(text));
                                 }
                                 Err(_) => break,
                             }

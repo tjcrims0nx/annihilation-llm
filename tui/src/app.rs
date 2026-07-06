@@ -337,31 +337,28 @@ impl App {
                         ParsedEvent::InteractivePrompt(prompt) => {
                             self.log_lines.push((prompt, LogLevel::Warning));
                         }
-                        ParsedEvent::Raw(_line) => {
-                            // Handled by OutputLine below to avoid duplicates
+                        ParsedEvent::Raw(line) => {
+                            if !line.trim().is_empty() && !line.contains("Spawning") {
+                                let mut clean = line.clone();
+                                if let Some(final_chunk) = clean.split('\r').last() {
+                                    clean = final_chunk.to_string();
+                                }
+                                if clean.contains("No GPU or other accelerator detected")
+                                    && self.sys_info.gpu_name != "Unknown"
+                                {
+                                    self.log_lines.push((
+                                            "CRITICAL WARNING: The TUI detects your GPU, but Python cannot see it! You have installed the CPU-only version of PyTorch. The process will run extremely slow.".to_string(),
+                                            LogLevel::Error
+                                        ));
+                                    self.log_lines.push((
+                                            "FIX THIS BY RUNNING: `uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121 --upgrade`".to_string(),
+                                            LogLevel::Error
+                                        ));
+                                }
+                                self.log_lines.push((clean, LogLevel::Dim));
+                            }
                         }
                     },
-                    SubprocessMessage::OutputLine(line) => {
-                        if !line.trim().is_empty() && !line.contains("Spawning") {
-                            let mut clean = crate::parser::strip_ansi(&line);
-                            if let Some(final_chunk) = clean.split('\r').last() {
-                                clean = final_chunk.to_string();
-                            }
-                            if clean.contains("No GPU or other accelerator detected")
-                                && self.sys_info.gpu_name != "Unknown"
-                            {
-                                self.log_lines.push((
-                                        "CRITICAL WARNING: The TUI detects your GPU, but Python cannot see it! You have installed the CPU-only version of PyTorch. The process will run extremely slow.".to_string(),
-                                        LogLevel::Error
-                                    ));
-                                self.log_lines.push((
-                                        "FIX THIS BY RUNNING: `uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121 --upgrade`".to_string(),
-                                        LogLevel::Error
-                                    ));
-                            }
-                            self.log_lines.push((clean, LogLevel::Dim));
-                        }
-                    }
                     SubprocessMessage::Exited(code) => {
                         if self.is_setting_up {
                             if code == Some(0) {
