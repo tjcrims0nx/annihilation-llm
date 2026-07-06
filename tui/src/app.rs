@@ -11,7 +11,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{
         Block, BorderType, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Wrap,
-        Chart, Dataset, GraphType, Axis, Table, Row, Cell, TableState,
+        Chart, Dataset, GraphType, Axis, Table, Row, Cell, TableState, Sparkline,
     },
     symbols,
 };
@@ -1308,7 +1308,7 @@ impl App {
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(theme::BORDER_ACTIVE))
             .title(Span::styled(" METRICS ", theme::title_style()))
-            .style(Style::default().bg(theme::BG_DARK));
+            .style(Style::default());
 
         let metrics_inner = metrics_block.inner(left_chunks[1]);
         frame.render_widget(metrics_block, left_chunks[1]);
@@ -1342,59 +1342,31 @@ impl App {
         frame.render_widget(Paragraph::new(refusal_line), metric_lines[0]);
         frame.render_widget(Paragraph::new(kl_line), metric_lines[1]);
 
-        // Draw Line Charts ("hills") instead of solid bars
-        let max_x = (self.current_trial.max(1) as f64).max(self.kl_history.len() as f64);
-        let kl_data: Vec<(f64, f64)> = self.kl_history.iter().enumerate().map(|(i, &v)| (i as f64, v)).collect();
-        let ref_data: Vec<(f64, f64)> = self.refusal_history.iter().enumerate().map(|(i, &v)| (i as f64, v)).collect();
-        
+        // Draw Sparklines ("spike graphs") instead of braille dots
         if !self.kl_history.is_empty() {
-            let kl_max_y = self.kl_history.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            let kl_min_y = self.kl_history.iter().cloned().fold(f64::INFINITY, f64::min);
-            let kl_range = (kl_max_y - kl_min_y).max(0.0001);
-            let kl_bounds = [kl_min_y.max(0.0) - (kl_range * 0.1), kl_max_y + (kl_range * 0.1)];
-
-            let kl_dataset = vec![
-                Dataset::default()
-                    .marker(symbols::Marker::Braille)
-                    .graph_type(GraphType::Line)
-                    .style(Style::default().fg(theme::NEON_CYAN))
-                    .data(&kl_data)
-            ];
-            let kl_chart = Chart::new(kl_dataset)
-                .block(Block::default()
-                    .title(Span::styled(" KL Div ", theme::dim_style()))
-                    .style(Style::default().bg(theme::BG_DARK))
-                )
-                .x_axis(Axis::default().bounds([0.0, max_x.max(1.0)]))
-                .y_axis(Axis::default().bounds(kl_bounds))
-                .hidden_legend_constraints((Constraint::Percentage(100), Constraint::Percentage(100)));
+            let kl_sparkline_data: Vec<u64> = self.kl_history.iter().map(|&v| (v * 10000.0) as u64).collect();
+            let max_val = kl_sparkline_data.iter().max().cloned().unwrap_or(0);
             
-            frame.render_widget(kl_chart, metric_lines[3]);
+            let kl_sparkline = Sparkline::default()
+                .block(Block::default().title(Span::styled(" KL Div ", theme::dim_style())))
+                .style(Style::default().fg(theme::NEON_CYAN))
+                .data(&kl_sparkline_data)
+                .max(max_val.max(1));
+            
+            frame.render_widget(kl_sparkline, metric_lines[3]);
         }
 
         if !self.refusal_history.is_empty() {
-            let ref_max_y = self.refusal_history.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            let ref_min_y = self.refusal_history.iter().cloned().fold(f64::INFINITY, f64::min);
-            let ref_range = (ref_max_y - ref_min_y).max(1.0);
-            let ref_bounds = [(ref_min_y - (ref_range * 0.1)).max(0.0), ref_max_y + (ref_range * 0.1)];
-
-            let ref_dataset = vec![
-                Dataset::default()
-                    .marker(symbols::Marker::Braille)
-                    .graph_type(GraphType::Line)
-                    .style(Style::default().fg(theme::NEON_GREEN))
-                    .data(&ref_data)
-            ];
-            let ref_chart = Chart::new(ref_dataset)
-                .block(Block::default()
-                    .title(Span::styled(" Refusals ", theme::dim_style()))
-                    .style(Style::default().bg(theme::BG_DARK))
-                )
-                .x_axis(Axis::default().bounds([0.0, max_x.max(1.0)]))
-                .y_axis(Axis::default().bounds(ref_bounds))
-                .hidden_legend_constraints((Constraint::Percentage(100), Constraint::Percentage(100)));
+            let ref_sparkline_data: Vec<u64> = self.refusal_history.iter().map(|&v| v as u64).collect();
+            let max_val = ref_sparkline_data.iter().max().cloned().unwrap_or(0);
             
-            frame.render_widget(ref_chart, metric_lines[5]);
+            let ref_sparkline = Sparkline::default()
+                .block(Block::default().title(Span::styled(" Refusals ", theme::dim_style())))
+                .style(Style::default().fg(theme::NEON_GREEN))
+                .data(&ref_sparkline_data)
+                .max(max_val.max(1));
+            
+            frame.render_widget(ref_sparkline, metric_lines[5]);
         }
 
         // ── Log Panel ──
