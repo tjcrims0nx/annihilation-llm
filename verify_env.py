@@ -38,7 +38,7 @@ def main():
             ".",
             "--extra-index-url",
             "https://download.pytorch.org/whl/cu121",
-            "--reinstall",
+            "--force-reinstall",
         ]
         print(f"Running: {' '.join(cmd)}", flush=True)
         subprocess.run(cmd, check=True)
