@@ -344,7 +344,9 @@ impl App {
                                     clean = final_chunk.to_string();
                                 }
                                 if clean.contains("No GPU or other accelerator detected")
+                                    && !self.sys_info.gpu_name.starts_with("CPU")
                                     && self.sys_info.gpu_name != "Unknown"
+                                    && self.sys_info.gpu_name != "Detecting..."
                                 {
                                     self.log_lines.push((
                                             "CRITICAL WARNING: The TUI detects your GPU, but Python cannot see it! You have installed the CPU-only version of PyTorch. The process will run extremely slow.".to_string(),
