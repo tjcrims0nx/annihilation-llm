@@ -1,5 +1,6 @@
-import sys
+import importlib.util
 import subprocess
+import sys
 
 
 def main():
@@ -18,10 +19,12 @@ def main():
             needs_reinstall = True
 
         # Test if torchvision is available
-        import torchvision
+        if importlib.util.find_spec("torchvision") is None:
+            raise ImportError("torchvision not found")
 
         # Test if annihilate is available
-        import annihilate
+        if importlib.util.find_spec("annihilate") is None:
+            raise ImportError("annihilate not found")
     except ImportError as e:
         print(f"Missing dependency detected ({e}). Installing...", flush=True)
         needs_install = True
