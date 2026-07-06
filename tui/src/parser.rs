@@ -140,6 +140,8 @@ pub fn parse_line(raw: &str) -> ParsedEvent {
     // Optimization complete
     if line.contains("Optimization complete")
         || line.contains("optimization complete")
+        || line.contains("Optimization finished")
+        || line.contains("Optimization interrupted by user")
         || line.contains("Pareto")
     {
         return ParsedEvent::OptimizationComplete;

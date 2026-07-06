@@ -228,6 +228,8 @@ impl SubprocessManager {
         cmd.env("PYTHONUNBUFFERED", "1");
         // Force color so rich prints nice ANSI tags we can strip, and tqdm falls back to newline mode
         cmd.env("FORCE_COLOR", "1");
+        // Automatically exit any questionary prompts (prevents NoConsoleScreenBufferError crash if python is interrupted)
+        cmd.env("ANNIHILATE_AUTO_SELECTS", "exit|exit|exit|exit");
 
         match cmd.spawn() {
             Ok(mut child) => {
