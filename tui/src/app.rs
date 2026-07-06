@@ -1498,7 +1498,7 @@ impl App {
             let err_widget = Paragraph::new(Line::from(Span::styled(
                 err,
                 Style::default()
-                    .fg(theme::ERROR)
+                    .fg(ratatui::style::Color::Red)
                     .add_modifier(Modifier::BOLD),
             )))
             .alignment(Alignment::Center);
