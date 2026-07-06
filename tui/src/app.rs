@@ -46,6 +46,7 @@ pub enum Screen {
     Export,
     Confirm(ConfirmAction),
     About,
+    RecentModels,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -399,6 +400,7 @@ impl App {
             Screen::Export => self.handle_export_key(key),
             Screen::Confirm(action) => self.handle_confirm_key(key, action.clone()),
             Screen::About => self.handle_about_key(key),
+            Screen::RecentModels => self.handle_recent_models_key(key),
         }
 
         self.should_quit
@@ -457,7 +459,23 @@ impl App {
                         self.model_input.clear();
                         self.model_cursor = 0;
                     }
-                    Some(1) => { /* Recent models - placeholder */ }
+                    Some(1) => { // Recent models
+                        let recent_file = crate::subprocess::get_repo_root().join(".recent_models");
+                        let recent: Vec<String> = std::fs::read_to_string(&recent_file).unwrap_or_default()
+                            .lines()
+                            .map(|s| s.to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        
+                        if recent.is_empty() {
+                            self.status_message = "No recent models found.".to_string();
+                        } else {
+                            self.screen = Screen::RecentModels;
+                            self.current_menu = recent.into_iter().map(|m| MenuItem::new(&m, "Select to launch")).collect();
+                            self.current_menu.push(MenuItem::new("Back", "Return to setup").with_key("Esc"));
+                            self.menu_state.select(Some(0));
+                        }
+                    }
                     Some(2) | _ => self.go_back_to_splash(),
                 }
             }
@@ -757,6 +775,42 @@ impl App {
         }
     }
 
+    // ─── Recent Models Keys ────────────────────────────────────
+
+    fn handle_recent_models_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => self.menu_up(),
+            KeyCode::Down | KeyCode::Char('j') => self.menu_down(),
+            KeyCode::Enter => {
+                let selected = self.menu_state.selected().unwrap_or(0);
+                if selected < self.current_menu.len() - 1 {
+                    // It's a model
+                    self.model_input = self.current_menu[selected].label.clone();
+                    self.start_processing();
+                } else {
+                    // It's the "Back" button
+                    self.screen = Screen::Setup;
+                    self.current_menu = vec![
+                        MenuItem::new("Enter Model ID/Path", "Type a Hugging Face model ID or local path").with_key("M"),
+                        MenuItem::new("Recent Models", "Choose from previously used models").with_key("R"),
+                        MenuItem::new("Back", "Return to main menu").with_key("Esc"),
+                    ];
+                    self.menu_state.select(Some(1));
+                }
+            }
+            KeyCode::Esc => {
+                self.screen = Screen::Setup;
+                self.current_menu = vec![
+                    MenuItem::new("Enter Model ID/Path", "Type a Hugging Face model ID or local path").with_key("M"),
+                    MenuItem::new("Recent Models", "Choose from previously used models").with_key("R"),
+                    MenuItem::new("Back", "Return to main menu").with_key("Esc"),
+                ];
+                self.menu_state.select(Some(1));
+            }
+            _ => {}
+        }
+    }
+
     // ─── Menu Helpers ──────────────────────────────────────────
 
     fn menu_up(&mut self) {
@@ -808,6 +862,20 @@ impl App {
             let _ = std::fs::remove_dir_all(&checkpoint_dir);
         }
 
+        // Save to recent models
+        if !self.model_input.is_empty() {
+            let recent_file = crate::subprocess::get_repo_root().join(".recent_models");
+            let mut recent: Vec<String> = std::fs::read_to_string(&recent_file).unwrap_or_default()
+                .lines()
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            recent.retain(|s| s != &self.model_input);
+            recent.insert(0, self.model_input.clone());
+            recent.truncate(5); // Keep top 5
+            let _ = std::fs::write(&recent_file, recent.join("\n"));
+        }
+
         self.subprocess = Some(SubprocessManager::spawn_setup(self.sys_info.gpu_name != "Unknown"));
     }
 
@@ -835,6 +903,7 @@ impl App {
             Screen::TrialActions => self.render_menu_screen(frame, area, "TRIAL ACTIONS", "What do you want to do with the decensored model?"),
             Screen::Chat => self.render_chat(frame, area),
             Screen::Export => self.render_menu_screen(frame, area, "EXPORT MODEL", "Choose export strategy:"),
+            Screen::RecentModels => self.render_menu_screen(frame, area, "RECENT MODELS", "Select a previously used model:"),
             Screen::Confirm(action) => {
                 // Render previous screen dimmed, then overlay
                 match action {
