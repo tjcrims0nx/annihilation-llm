@@ -1193,22 +1193,10 @@ impl App {
     // ─── Processing Dashboard ──────────────────────────────────
 
     fn render_processing(&mut self, frame: &mut Frame, area: Rect) {
-        let max_width = 140;
-        let h_layout = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Min(0),
-                Constraint::Length(max_width.min(area.width)),
-                Constraint::Min(0),
-            ])
-            .split(Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1)));
-        
-        let center_area = h_layout[1];
-
         let main_chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(40), Constraint::Length(34)])
-            .split(center_area);
+            .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
+            .split(Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1)));
 
         let left_chunks = Layout::default()
             .direction(Direction::Vertical)
