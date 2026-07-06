@@ -57,20 +57,31 @@ impl SystemInfo {
                 }
             }
         }
-        
+
         // Fallback to CPU detection
         #[cfg(target_os = "windows")]
         {
-            if let Ok(output) = Command::new("powershell").args(["-NoProfile", "-Command", "(Get-CimInstance Win32_Processor).Name"]).output() {
+            if let Ok(output) = Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    "(Get-CimInstance Win32_Processor).Name",
+                ])
+                .output()
+            {
                 if output.status.success() {
                     let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    self.gpu_name = if name.is_empty() { "CPU (Unknown)".to_string() } else { format!("CPU: {}", name) };
+                    self.gpu_name = if name.is_empty() {
+                        "CPU (Unknown)".to_string()
+                    } else {
+                        format!("CPU: {}", name)
+                    };
                 } else {
                     self.gpu_name = "CPU (Unknown)".to_string();
                 }
             }
         }
-        
+
         #[cfg(not(target_os = "windows"))]
         {
             if let Ok(output) = Command::new("sh").args(["-c", "cat /proc/cpuinfo | grep -i 'model name' | head -n 1 | awk -F: '{print $2}' | xargs"]).output() {
@@ -96,14 +107,15 @@ impl SystemInfo {
                 .output();
 
             if let Ok(output) = output
-                && output.status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    let parts: Vec<&str> = stdout.trim().split(',').collect();
-                    if parts.len() >= 2 {
-                        self.ram_total_mb = parts[0].parse().unwrap_or(0.0);
-                        self.ram_used_mb = parts[1].parse().unwrap_or(0.0);
-                    }
+                && output.status.success()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let parts: Vec<&str> = stdout.trim().split(',').collect();
+                if parts.len() >= 2 {
+                    self.ram_total_mb = parts[0].parse().unwrap_or(0.0);
+                    self.ram_used_mb = parts[1].parse().unwrap_or(0.0);
                 }
+            }
         }
 
         #[cfg(not(target_os = "windows"))]
@@ -113,31 +125,30 @@ impl SystemInfo {
                 .output();
 
             if let Ok(output) = output
-                && output.status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    let parts: Vec<&str> = stdout.trim().split(',').collect();
-                    if parts.len() >= 2 {
-                        self.ram_total_mb = parts[0].parse().unwrap_or(0.0);
-                        self.ram_used_mb = parts[1].parse().unwrap_or(0.0);
-                    }
+                && output.status.success()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let parts: Vec<&str> = stdout.trim().split(',').collect();
+                if parts.len() >= 2 {
+                    self.ram_total_mb = parts[0].parse().unwrap_or(0.0);
+                    self.ram_used_mb = parts[1].parse().unwrap_or(0.0);
                 }
+            }
         }
     }
 
     /// Quick GPU refresh using nvidia-smi (just VRAM usage, faster).
     pub fn refresh_vram_quick(&mut self) {
         let output = Command::new("nvidia-smi")
-            .args([
-                "--query-gpu=memory.used",
-                "--format=csv,noheader,nounits",
-            ])
+            .args(["--query-gpu=memory.used", "--format=csv,noheader,nounits"])
             .output();
 
         if let Ok(output) = output
-            && output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                self.vram_used_mb = stdout.trim().parse().unwrap_or(self.vram_used_mb);
-            }
+            && output.status.success()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            self.vram_used_mb = stdout.trim().parse().unwrap_or(self.vram_used_mb);
+        }
     }
 
     /// Get VRAM in GB for display.

@@ -30,69 +30,28 @@ fn repo_root() -> PathBuf {
 /// Get the path to the Python executable in the project venv.
 fn python_exe() -> PathBuf {
     let root = repo_root();
-    
+
     // Check multiple common venv names
     let venv_names = [".venv", "annihilation-env", "venv", "env"];
-    
+
     for venv in venv_names.iter() {
         let path = if cfg!(windows) {
             root.join(venv).join("Scripts").join("python.exe")
         } else {
             root.join(venv).join("bin").join("python")
         };
-        
+
         if path.exists() {
             return path;
         }
     }
-    
+
     // Fallback if none exist (will likely crash on spawn, but we try the standard)
     if cfg!(windows) {
         root.join(".venv").join("Scripts").join("python.exe")
     } else {
         root.join(".venv").join("bin").join("python")
     }
-}
-
-fn spawn_exit_watcher(child_id: u32, tx_wait: Sender<SubprocessMessage>) {
-    thread::spawn(move || {
-        if cfg!(windows) {
-            let script = format!(
-                "$p = Get-Process -Id {} -ErrorAction SilentlyContinue; \
-                 if ($null -eq $p) {{ exit 255 }}; \
-                 $p.WaitForExit(); exit $p.ExitCode",
-                child_id
-            );
-
-            let code = Command::new("powershell")
-                .args(["-NoProfile", "-Command", &script])
-                .status()
-                .ok()
-                .and_then(|status| status.code());
-
-            let _ = tx_wait.send(SubprocessMessage::Exited(code));
-        } else {
-            // Unix: poll via /proc or kill(0)
-            loop {
-                thread::sleep(std::time::Duration::from_millis(500));
-                // Check if process is still alive with kill(pid, 0)
-                let status = Command::new("kill")
-                    .args(["-0", &child_id.to_string()])
-                    .status();
-                match status {
-                    Ok(s) if !s.success() => {
-                        let _ = tx_wait.send(SubprocessMessage::Exited(Some(0)));
-                        break;
-                    }
-                    Err(_) => {
-                        let _ = tx_wait.send(SubprocessMessage::Exited(None));
-                        break;
-                    }
-                    _ => {} // still running
-                }
-            }
-        }
-    });
 }
 
 /// Messages sent from the subprocess to the UI.
@@ -174,8 +133,6 @@ impl SubprocessManager {
                         }
                     });
                 }
-
-                spawn_exit_watcher(child.id(), tx.clone());
 
                 Self {
                     rx,
@@ -290,8 +247,6 @@ impl SubprocessManager {
                     None
                 };
 
-                spawn_exit_watcher(child.id(), tx.clone());
-
                 Self {
                     rx,
                     child: Some(child),
@@ -342,11 +297,21 @@ impl SubprocessManager {
     }
 
     /// Poll for all pending messages (non-blocking).
-    pub fn poll_messages(&self) -> Vec<SubprocessMessage> {
+    pub fn poll_messages(&mut self) -> Vec<SubprocessMessage> {
         let mut messages = Vec::new();
         while let Ok(msg) = self.rx.try_recv() {
             messages.push(msg);
         }
+
+        // Also reap the child if it exited, avoiding zombie processes,
+        // and instantly surface the exit code to the UI thread.
+        if let Some(ref mut child) = self.child {
+            if let Ok(Some(status)) = child.try_wait() {
+                messages.push(SubprocessMessage::Exited(status.code()));
+                self.child = None; // Clean up so we only emit Exited once
+            }
+        }
+
         messages
     }
 }

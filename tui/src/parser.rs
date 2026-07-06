@@ -15,9 +15,14 @@ pub enum ParsedEvent {
     /// Refusal direction calculation started
     CalculatingDirections,
     /// Optimization starting
-    OptimizationStarting { n_trials: usize },
+    OptimizationStarting {
+        n_trials: usize,
+    },
     /// Trial started
-    TrialStarting { trial_number: usize, total_trials: usize },
+    TrialStarting {
+        trial_number: usize,
+        total_trials: usize,
+    },
     /// A trial completed with metrics
     TrialComplete {
         trial_number: usize,
@@ -35,13 +40,18 @@ pub enum ParsedEvent {
     /// Optimization finished
     OptimizationComplete,
     /// GPU memory info
-    GpuMemory { used_gb: f64, total_gb: f64 },
+    GpuMemory {
+        used_gb: f64,
+        total_gb: f64,
+    },
     /// Elapsed time
     ElapsedTime(String),
     /// ETA
     EstimatedRemaining(String),
     /// Trial was pruned
-    TrialPruned { trial_number: usize },
+    TrialPruned {
+        trial_number: usize,
+    },
     /// Error message
     Error(String),
     /// Warning message
@@ -111,20 +121,25 @@ pub fn parse_line(raw: &str) -> ParsedEvent {
         let parts: Vec<&str> = line.split_whitespace().collect();
         let mut trial_num = 0;
         let mut total_trials = 0;
-        
+
         for (i, part) in parts.iter().enumerate() {
-            if part.contains("trial") && i + 1 < parts.len()
-                && let Ok(n) = parts[i + 1].replace(',', "").parse() {
-                    trial_num = n;
-                }
+            if part.contains("trial")
+                && i + 1 < parts.len()
+                && let Ok(n) = parts[i + 1].replace(',', "").parse()
+            {
+                trial_num = n;
+            }
             if part.contains("of") && i + 1 < parts.len() {
-                let stripped: String = parts[i + 1].chars().filter(|c| c.is_ascii_digit()).collect();
+                let stripped: String = parts[i + 1]
+                    .chars()
+                    .filter(|c| c.is_ascii_digit())
+                    .collect();
                 if let Ok(n) = stripped.parse() {
                     total_trials = n;
                 }
             }
         }
-        
+
         if trial_num > 0 && total_trials > 0 {
             return ParsedEvent::TrialStarting {
                 trial_number: trial_num,
@@ -150,9 +165,10 @@ pub fn parse_line(raw: &str) -> ParsedEvent {
 
     // KL divergence standalone
     if (line.contains("KL divergence") || line.contains("kl_divergence"))
-        && let Some(kl) = extract_float_after(&line, "KL") {
-            return ParsedEvent::KLDivergence(kl);
-        }
+        && let Some(kl) = extract_float_after(&line, "KL")
+    {
+        return ParsedEvent::KLDivergence(kl);
+    }
 
     // GPU memory
     if line.contains("GPU") && line.contains("GB") && line.contains("allocated") {
@@ -185,7 +201,9 @@ pub fn parse_line(raw: &str) -> ParsedEvent {
     }
 
     // Questionary/interactive prompt detection
-    if line.contains("?") && (line.contains("Select") || line.contains("Choose") || line.contains("What")) {
+    if line.contains("?")
+        && (line.contains("Select") || line.contains("Choose") || line.contains("What"))
+    {
         return ParsedEvent::InteractivePrompt(line);
     }
 
@@ -198,7 +216,10 @@ fn extract_number_after(s: &str, keyword: &str) -> Option<f64> {
     if let Some(pos) = s.to_lowercase().find(&keyword.to_lowercase()) {
         let after = &s[pos + keyword.len()..];
         for word in after.split_whitespace() {
-            let cleaned: String = word.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect();
+            let cleaned: String = word
+                .chars()
+                .filter(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
             if let Ok(n) = cleaned.parse::<f64>() {
                 return Some(n);
             }
@@ -245,7 +266,11 @@ mod tests {
     #[test]
     fn test_parse_trial() {
         match parse_line("Running trial 5 of 200") {
-            ParsedEvent::TrialComplete { trial_number: 5, total_trials: 200, .. } => {},
+            ParsedEvent::TrialComplete {
+                trial_number: 5,
+                total_trials: 200,
+                ..
+            } => {}
             other => panic!("Expected TrialComplete, got {:?}", other),
         }
     }
@@ -253,7 +278,11 @@ mod tests {
     #[test]
     fn test_parse_refusals() {
         match parse_line("Refusals: 3/100, KL divergence: 0.0312") {
-            ParsedEvent::TrialComplete { refusals: 3, total_prompts: 100, .. } => {},
+            ParsedEvent::TrialComplete {
+                refusals: 3,
+                total_prompts: 100,
+                ..
+            } => {}
             other => panic!("Expected TrialComplete, got {:?}", other),
         }
     }

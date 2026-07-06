@@ -2,7 +2,6 @@
 ///
 /// Manages all screens: Splash, Setup, Processing Dashboard,
 /// Results, Chat, and Export — each with user-friendly selection menus.
-
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame,
@@ -10,8 +9,8 @@ use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Wrap,
-        Table, Row, Cell, TableState, Sparkline,
+        Block, BorderType, Borders, Cell, Clear, Gauge, List, ListItem, ListState, Paragraph, Row,
+        Sparkline, Table, TableState, Wrap,
     },
 };
 
@@ -159,7 +158,8 @@ pub enum LogLevel {
 impl App {
     pub fn new() -> Self {
         let splash_menu = vec![
-            MenuItem::new("Start Decensoring", "Launch the annihilation workflow").with_key("Enter"),
+            MenuItem::new("Start Decensoring", "Launch the annihilation workflow")
+                .with_key("Enter"),
             MenuItem::new("Configuration", "Edit settings before running").with_key("C"),
             MenuItem::new("About", "View project information").with_key("A"),
             MenuItem::new("Quit", "Exit the application").with_key("Q"),
@@ -214,168 +214,243 @@ impl App {
         self.glow_phase = (self.tick_count as f64 * 0.05).sin() * 0.5 + 0.5;
 
         // Process real subprocess events
-        if self.screen == Screen::Processing && self.is_processing
-            && let Some(ref mut child) = self.subprocess {
-                use crate::subprocess::SubprocessMessage;
-                let msgs = child.poll_messages();
+        if self.screen == Screen::Processing
+            && self.is_processing
+            && let Some(ref mut child) = self.subprocess
+        {
+            use crate::subprocess::SubprocessMessage;
+            let msgs = child.poll_messages();
 
-                for msg in msgs {
-                    match msg {
-                        SubprocessMessage::Event(event) => match event {
-                            ParsedEvent::ModelLoading(msg) => {
-                                self.log_lines.push((msg, LogLevel::Info));
-                            }
-                            ParsedEvent::BatchSize(size) => {
-                                self.batch_size = size;
-                                self.log_lines.push((format!("Determined batch size: {}", size), LogLevel::Success));
-                            }
-                            ParsedEvent::DatasetLoading(msg) => {
-                                self.log_lines.push((msg, LogLevel::Dim));
-                            }
-                            ParsedEvent::KLDivergence(kl) => {
-                                self.pending_kl = Some(kl);
-                            }
-                            ParsedEvent::CalculatingDirections => {
-                                self.log_lines.push(("Calculating per-layer refusal directions...".into(), LogLevel::Info));
-                            }
-                            ParsedEvent::OptimizationStarting { n_trials } => {
-                                self.total_trials = n_trials;
-                                self.log_lines.push(("Starting optimization...".into(), LogLevel::Success));
-                            }
-                            ParsedEvent::TrialStarting { trial_number, total_trials } => {
+            for msg in msgs {
+                match msg {
+                    SubprocessMessage::Event(event) => match event {
+                        ParsedEvent::ModelLoading(msg) => {
+                            self.log_lines.push((msg, LogLevel::Info));
+                        }
+                        ParsedEvent::BatchSize(size) => {
+                            self.batch_size = size;
+                            self.log_lines.push((
+                                format!("Determined batch size: {}", size),
+                                LogLevel::Success,
+                            ));
+                        }
+                        ParsedEvent::DatasetLoading(msg) => {
+                            self.log_lines.push((msg, LogLevel::Dim));
+                        }
+                        ParsedEvent::KLDivergence(kl) => {
+                            self.pending_kl = Some(kl);
+                        }
+                        ParsedEvent::CalculatingDirections => {
+                            self.log_lines.push((
+                                "Calculating per-layer refusal directions...".into(),
+                                LogLevel::Info,
+                            ));
+                        }
+                        ParsedEvent::OptimizationStarting { n_trials } => {
+                            self.total_trials = n_trials;
+                            self.log_lines
+                                .push(("Starting optimization...".into(), LogLevel::Success));
+                        }
+                        ParsedEvent::TrialStarting {
+                            trial_number,
+                            total_trials,
+                        } => {
+                            self.current_trial = trial_number;
+                            self.total_trials = total_trials;
+                            self.log_lines.push((
+                                format!("Starting trial {}/{}...", trial_number, total_trials),
+                                LogLevel::Info,
+                            ));
+                        }
+                        ParsedEvent::TrialComplete {
+                            trial_number,
+                            total_trials: _,
+                            refusals,
+                            total_prompts,
+                        } => {
+                            if trial_number > 0 {
                                 self.current_trial = trial_number;
-                                self.total_trials = total_trials;
-                                self.log_lines.push((format!("Starting trial {}/{}...", trial_number, total_trials), LogLevel::Info));
+                            } else {
+                                self.current_trial += 1; // Fallback if we couldn't parse the exact number
                             }
-                            ParsedEvent::TrialComplete { trial_number, total_trials: _, refusals, total_prompts } => {
-                                if trial_number > 0 {
-                                    self.current_trial = trial_number;
+
+                            let kl_divergence = self.pending_kl.take().unwrap_or(0.0);
+                            self.kl_history.push(kl_divergence);
+                            self.refusal_history.push(refusals as f64);
+
+                            if self.best_kl.is_none() || kl_divergence < self.best_kl.unwrap() {
+                                self.best_kl = Some(kl_divergence);
+                            }
+                            if self.best_refusals.is_none()
+                                || refusals < self.best_refusals.unwrap()
+                            {
+                                self.best_refusals = Some(refusals);
+                            }
+
+                            self.log_lines.push((
+                                format!(
+                                    "Trial {}: refusals={}/{}, KL={:.4}",
+                                    self.current_trial, refusals, total_prompts, kl_divergence
+                                ),
+                                if refusals <= 5 {
+                                    LogLevel::Success
                                 } else {
-                                    self.current_trial += 1; // Fallback if we couldn't parse the exact number
-                                }
-
-                                let kl_divergence = self.pending_kl.take().unwrap_or(0.0);
-                                self.kl_history.push(kl_divergence);
-                                self.refusal_history.push(refusals as f64);
-
-                                if self.best_kl.is_none() || kl_divergence < self.best_kl.unwrap() {
-                                    self.best_kl = Some(kl_divergence);
-                                }
-                                if self.best_refusals.is_none() || refusals < self.best_refusals.unwrap() {
-                                    self.best_refusals = Some(refusals);
-                                }
-
+                                    LogLevel::Info
+                                },
+                            ));
+                        }
+                        ParsedEvent::BestTrial { .. } => {}
+                        ParsedEvent::OptimizationComplete => {
+                            self.log_lines
+                                .push(("Optimization finished!".into(), LogLevel::Success));
+                            self.is_processing = false;
+                            self.generate_demo_results(); // Still use demo results for now until the interactive menu parser is fully connected
+                            self.switch_to_results();
+                        }
+                        ParsedEvent::GpuMemory { .. } => {}
+                        ParsedEvent::ElapsedTime(time) => {
+                            // Time is string "00:00:00", could parse it, but for now just status
+                            self.log_lines
+                                .push((format!("Elapsed: {}", time), LogLevel::Dim));
+                        }
+                        ParsedEvent::EstimatedRemaining(time) => {
+                            self.log_lines
+                                .push((format!("ETA: {}", time), LogLevel::Dim));
+                        }
+                        ParsedEvent::TrialPruned { trial_number } => {
+                            self.log_lines.push((
+                                format!("Trial {} pruned", trial_number),
+                                LogLevel::Warning,
+                            ));
+                        }
+                        ParsedEvent::Error(err) => {
+                            self.log_lines.push((err, LogLevel::Error));
+                        }
+                        ParsedEvent::Warning(warn) => {
+                            self.log_lines.push((warn, LogLevel::Warning));
+                        }
+                        ParsedEvent::Status(msg) => {
+                            self.log_lines.push((msg, LogLevel::Info));
+                        }
+                        ParsedEvent::InteractivePrompt(prompt) => {
+                            self.log_lines.push((prompt, LogLevel::Warning));
+                        }
+                        ParsedEvent::Raw(_line) => {
+                            // Handled by OutputLine below to avoid duplicates
+                        }
+                    },
+                    SubprocessMessage::OutputLine(line) => {
+                        if !line.trim().is_empty() && !line.contains("Spawning") {
+                            let clean = crate::parser::strip_ansi(&line);
+                            if clean.contains("No GPU or other accelerator detected")
+                                && self.sys_info.gpu_name != "Unknown"
+                            {
                                 self.log_lines.push((
-                                    format!("Trial {}: refusals={}/{}, KL={:.4}",
-                                        self.current_trial, refusals, total_prompts, kl_divergence),
-                                    if refusals <= 5 { LogLevel::Success } else { LogLevel::Info },
-                                ));
-                            }
-                            ParsedEvent::BestTrial { .. } => {}
-                            ParsedEvent::OptimizationComplete => {
-                                self.log_lines.push(("Optimization finished!".into(), LogLevel::Success));
-                                self.is_processing = false;
-                                self.generate_demo_results(); // Still use demo results for now until the interactive menu parser is fully connected
-                                self.switch_to_results();
-                            }
-                            ParsedEvent::GpuMemory { .. } => {}
-                            ParsedEvent::ElapsedTime(time) => {
-                                // Time is string "00:00:00", could parse it, but for now just status
-                                self.log_lines.push((format!("Elapsed: {}", time), LogLevel::Dim));
-                            }
-                            ParsedEvent::EstimatedRemaining(time) => {
-                                self.log_lines.push((format!("ETA: {}", time), LogLevel::Dim));
-                            }
-                            ParsedEvent::TrialPruned { trial_number } => {
-                                self.log_lines.push((format!("Trial {} pruned", trial_number), LogLevel::Warning));
-                            }
-                            ParsedEvent::Error(err) => {
-                                self.log_lines.push((err, LogLevel::Error));
-                            }
-                            ParsedEvent::Warning(warn) => {
-                                self.log_lines.push((warn, LogLevel::Warning));
-                            }
-                            ParsedEvent::Status(msg) => {
-                                self.log_lines.push((msg, LogLevel::Info));
-                            }
-                            ParsedEvent::InteractivePrompt(prompt) => {
-                                self.log_lines.push((prompt, LogLevel::Warning));
-                            }
-                            ParsedEvent::Raw(_line) => {
-                                // Handled by OutputLine below to avoid duplicates
-                            }
-                        },
-                        SubprocessMessage::OutputLine(line) => {
-                            if !line.trim().is_empty() && !line.contains("Spawning") {
-                                let clean = crate::parser::strip_ansi(&line);
-                                if clean.contains("No GPU or other accelerator detected") && self.sys_info.gpu_name != "Unknown" {
-                                    self.log_lines.push((
                                         "CRITICAL WARNING: The TUI detects your GPU, but Python cannot see it! You have installed the CPU-only version of PyTorch. The process will run extremely slow.".to_string(),
                                         LogLevel::Error
                                     ));
-                                    self.log_lines.push((
+                                self.log_lines.push((
                                         "FIX THIS BY RUNNING: `uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121 --upgrade`".to_string(),
                                         LogLevel::Error
                                     ));
-                                }
-                                self.log_lines.push((clean, LogLevel::Dim));
                             }
-                        }
-                        SubprocessMessage::Exited(code) => {
-                            if self.is_setting_up {
-                                if code == Some(0) {
-                                    self.is_setting_up = false;
-                                    self.log_lines.push(("Environment verification complete. Spawning backend...".to_string(), LogLevel::Info));
-                                    
-                                    // Start the actual subprocess
-                                    let mut extra_args = vec![
-                                        "--n-trials".to_string(),
-                                        self.total_trials.to_string(),
-                                    ];
-                                    
-                                    // Add quantization if selected.
-                                    if self.quantize {
-                                        extra_args.push("--quantization".to_string());
-                                        extra_args.push("bnb_4bit".to_string());
-                                    }
-                                    
-                                    self.subprocess = Some(SubprocessManager::spawn(&self.model_input, &extra_args));
-                                } else {
-                                    self.is_processing = false;
-                                    self.is_setting_up = false;
-                                    self.log_lines.push((format!("Setup exited with code {:?}", code), LogLevel::Warning));
-                                }
-                            } else {
-                                self.is_processing = false;
-                                self.log_lines.push((format!("Process exited with code {:?}", code), LogLevel::Warning));
-                                // Wait for user to manually exit or review logs rather than forcing them to the results screen
-                            }
-                        }
-                        SubprocessMessage::SpawnError(err) => {
-                            self.is_processing = false;
-                            self.log_lines.push((err, LogLevel::Error));
+                            self.log_lines.push((clean, LogLevel::Dim));
                         }
                     }
-                }
+                    SubprocessMessage::Exited(code) => {
+                        if self.is_setting_up {
+                            if code == Some(0) {
+                                self.is_setting_up = false;
+                                self.log_lines.push((
+                                    "Environment verification complete. Spawning backend..."
+                                        .to_string(),
+                                    LogLevel::Info,
+                                ));
 
-                // Refresh real system stats periodically
-                if self.tick_count.is_multiple_of(30) {
-                    self.sys_info.refresh_gpu();
-                    self.sys_info.refresh_ram();
-                    // Fake tokens per sec since we can't easily parse that from output yet
-                    self.tokens_per_sec = 847.0 + (self.tick_count as f64 * 0.01).sin() * 50.0;
-                    self.elapsed_secs += 1; // Roughly 1 second elapsed (at 30fps)
+                                // Start the actual subprocess
+                                let mut extra_args =
+                                    vec!["--n-trials".to_string(), self.total_trials.to_string()];
+
+                                // Add quantization if selected.
+                                if self.quantize {
+                                    extra_args.push("--quantization".to_string());
+                                    extra_args.push("bnb_4bit".to_string());
+                                }
+
+                                self.subprocess =
+                                    Some(SubprocessManager::spawn(&self.model_input, &extra_args));
+                            } else {
+                                self.is_processing = false;
+                                self.is_setting_up = false;
+                                self.log_lines.push((
+                                    format!("Setup exited with code {:?}", code),
+                                    LogLevel::Warning,
+                                ));
+                            }
+                        } else {
+                            self.is_processing = false;
+                            self.log_lines.push((
+                                format!("Process exited with code {:?}", code),
+                                LogLevel::Warning,
+                            ));
+                            // Wait for user to manually exit or review logs rather than forcing them to the results screen
+                        }
+                    }
+                    SubprocessMessage::SpawnError(err) => {
+                        self.is_processing = false;
+                        self.log_lines.push((err, LogLevel::Error));
+                    }
                 }
             }
+
+            // Refresh real system stats periodically
+            if self.tick_count.is_multiple_of(30) {
+                self.sys_info.refresh_gpu();
+                self.sys_info.refresh_ram();
+                // Fake tokens per sec since we can't easily parse that from output yet
+                self.tokens_per_sec = 847.0 + (self.tick_count as f64 * 0.01).sin() * 50.0;
+                self.elapsed_secs += 1; // Roughly 1 second elapsed (at 30fps)
+            }
+        }
     }
 
     fn generate_demo_results(&mut self) {
         self.trials = vec![
-            TrialResult { index: 142, refusals: 2, total_prompts: 100, kl_divergence: 0.0312, direction: "global".into() },
-            TrialResult { index: 87, refusals: 0, total_prompts: 100, kl_divergence: 0.1247, direction: "per layer".into() },
-            TrialResult { index: 198, refusals: 1, total_prompts: 100, kl_divergence: 0.0589, direction: "global".into() },
-            TrialResult { index: 56, refusals: 3, total_prompts: 100, kl_divergence: 0.0201, direction: "per layer".into() },
-            TrialResult { index: 171, refusals: 5, total_prompts: 100, kl_divergence: 0.0098, direction: "global".into() },
+            TrialResult {
+                index: 142,
+                refusals: 2,
+                total_prompts: 100,
+                kl_divergence: 0.0312,
+                direction: "global".into(),
+            },
+            TrialResult {
+                index: 87,
+                refusals: 0,
+                total_prompts: 100,
+                kl_divergence: 0.1247,
+                direction: "per layer".into(),
+            },
+            TrialResult {
+                index: 198,
+                refusals: 1,
+                total_prompts: 100,
+                kl_divergence: 0.0589,
+                direction: "global".into(),
+            },
+            TrialResult {
+                index: 56,
+                refusals: 3,
+                total_prompts: 100,
+                kl_divergence: 0.0201,
+                direction: "per layer".into(),
+            },
+            TrialResult {
+                index: 171,
+                refusals: 5,
+                total_prompts: 100,
+                kl_divergence: 0.0098,
+                direction: "global".into(),
+            },
         ];
     }
 
@@ -383,8 +458,14 @@ impl App {
         self.screen = Screen::Results;
         self.trial_list_state.select(Some(0));
         self.current_menu = vec![
-            MenuItem::new("Select this trial", "Use the selected trial for export/chat"),
-            MenuItem::new("Run additional trials", "Continue optimization with more trials"),
+            MenuItem::new(
+                "Select this trial",
+                "Use the selected trial for export/chat",
+            ),
+            MenuItem::new(
+                "Run additional trials",
+                "Continue optimization with more trials",
+            ),
             MenuItem::new("Back to main menu", "Return to splash screen"),
         ];
         self.menu_state.select(Some(0));
@@ -419,7 +500,7 @@ impl App {
     /// Handle mouse input — primarily for scrolling
     pub fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
         use crossterm::event::MouseEventKind;
-        
+
         match self.screen {
             Screen::Processing => {
                 match mouse.kind {
@@ -449,19 +530,29 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') => self.menu_down(),
             KeyCode::Enter => {
                 match self.menu_state.selected() {
-                    Some(0) => { // Start
+                    Some(0) => {
+                        // Start
                         self.screen = Screen::Setup;
                         self.current_menu = vec![
-                            MenuItem::new("Enter Model ID/Path", "Type a Hugging Face model ID or local path").with_key("M"),
-                            MenuItem::new("Recent Models", "Choose from previously used models").with_key("R"),
+                            MenuItem::new(
+                                "Enter Model ID/Path",
+                                "Type a Hugging Face model ID or local path",
+                            )
+                            .with_key("M"),
+                            MenuItem::new("Recent Models", "Choose from previously used models")
+                                .with_key("R"),
                             MenuItem::new("Back", "Return to main menu").with_key("Esc"),
                         ];
                         self.menu_state.select(Some(0));
                     }
-                    Some(1) => { // Config
+                    Some(1) => {
+                        // Config
                         self.screen = Screen::ConfigSelect;
                         self.current_menu = vec![
-                            MenuItem::new("Default (200 trials)", "Standard configuration, no quantization"),
+                            MenuItem::new(
+                                "Default (200 trials)",
+                                "Standard configuration, no quantization",
+                            ),
                             MenuItem::new("Quick Test (50 trials)", "Faster run for testing"),
                             MenuItem::new("Aggressive (400 trials)", "More thorough optimization"),
                             MenuItem::new("4-bit Quantized", "Lower VRAM usage with bnb_4bit"),
@@ -489,25 +580,32 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') => self.menu_down(),
             KeyCode::Enter => {
                 match self.menu_state.selected() {
-                    Some(0) => { // Enter model
+                    Some(0) => {
+                        // Enter model
                         self.screen = Screen::ModelInput;
                         self.model_input.clear();
                         self.model_cursor = 0;
                     }
-                    Some(1) => { // Recent models
+                    Some(1) => {
+                        // Recent models
                         let recent_file = crate::subprocess::get_repo_root().join(".recent_models");
-                        let recent: Vec<String> = std::fs::read_to_string(&recent_file).unwrap_or_default()
+                        let recent: Vec<String> = std::fs::read_to_string(&recent_file)
+                            .unwrap_or_default()
                             .lines()
                             .map(|s| s.to_string())
                             .filter(|s| !s.is_empty())
                             .collect();
-                        
+
                         if recent.is_empty() {
                             self.status_message = "No recent models found.".to_string();
                         } else {
                             self.screen = Screen::RecentModels;
-                            self.current_menu = recent.into_iter().map(|m| MenuItem::new(&m, "Select to launch")).collect();
-                            self.current_menu.push(MenuItem::new("Back", "Return to setup").with_key("Esc"));
+                            self.current_menu = recent
+                                .into_iter()
+                                .map(|m| MenuItem::new(&m, "Select to launch"))
+                                .collect();
+                            self.current_menu
+                                .push(MenuItem::new("Back", "Return to setup").with_key("Esc"));
                             self.menu_state.select(Some(0));
                         }
                     }
@@ -531,8 +629,13 @@ impl App {
             KeyCode::Esc => {
                 self.screen = Screen::Setup;
                 self.current_menu = vec![
-                    MenuItem::new("Enter Model ID/Path", "Type a Hugging Face model ID or local path").with_key("M"),
-                    MenuItem::new("Recent Models", "Choose from previously used models").with_key("R"),
+                    MenuItem::new(
+                        "Enter Model ID/Path",
+                        "Type a Hugging Face model ID or local path",
+                    )
+                    .with_key("M"),
+                    MenuItem::new("Recent Models", "Choose from previously used models")
+                        .with_key("R"),
                     MenuItem::new("Back", "Return to main menu").with_key("Esc"),
                 ];
                 self.menu_state.select(Some(0));
@@ -608,7 +711,10 @@ impl App {
             KeyCode::Char('q') | KeyCode::Char('Q') => {
                 self.screen = Screen::Confirm(ConfirmAction::StopProcessing);
                 self.current_menu = vec![
-                    MenuItem::new("Yes, stop processing", "Halt optimization and view results so far"),
+                    MenuItem::new(
+                        "Yes, stop processing",
+                        "Halt optimization and view results so far",
+                    ),
                     MenuItem::new("No, continue", "Keep running trials"),
                 ];
                 self.menu_state.select(Some(1)); // Default to "No"
@@ -647,12 +753,16 @@ impl App {
                 if self.trial_list_state.selected().is_some() {
                     self.screen = Screen::TrialActions;
                     self.current_menu = vec![
-                        MenuItem::new("Save Model Locally", "Export merged model to a folder").with_key("S"),
-                        MenuItem::new("Upload to Hugging Face", "Push model to HF Hub").with_key("U"),
+                        MenuItem::new("Save Model Locally", "Export merged model to a folder")
+                            .with_key("S"),
+                        MenuItem::new("Upload to Hugging Face", "Push model to HF Hub")
+                            .with_key("U"),
                         MenuItem::new("Chat with Model", "Test the decensored model").with_key("C"),
-                        MenuItem::new("Run Benchmarks", "Evaluate with MMLU, GSM8K, etc.").with_key("B"),
+                        MenuItem::new("Run Benchmarks", "Evaluate with MMLU, GSM8K, etc.")
+                            .with_key("B"),
                         MenuItem::new("Run More Trials", "Continue optimization").with_key("R"),
-                        MenuItem::new("Back to Results", "Return to trial selection").with_key("Esc"),
+                        MenuItem::new("Back to Results", "Return to trial selection")
+                            .with_key("Esc"),
                     ];
                     self.menu_state.select(Some(0));
                 }
@@ -672,21 +782,29 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') => self.menu_down(),
             KeyCode::Enter => {
                 match self.menu_state.selected() {
-                    Some(0) => { // Save locally
+                    Some(0) => {
+                        // Save locally
                         self.screen = Screen::Export;
                         self.current_menu = vec![
                             MenuItem::new("Merge and export full model", "Requires sufficient RAM"),
-                            MenuItem::new("Export adapter only", "Can be merged later, smaller file"),
+                            MenuItem::new(
+                                "Export adapter only",
+                                "Can be merged later, smaller file",
+                            ),
                             MenuItem::new("Back", "Return to actions menu").with_key("Esc"),
                         ];
                         self.menu_state.select(Some(0));
                     }
                     Some(1) => { /* Upload - would need HF token input */ }
-                    Some(2) => { // Chat
+                    Some(2) => {
+                        // Chat
                         self.screen = Screen::Chat;
                         self.chat_messages.clear();
                         self.chat_input.clear();
-                        self.chat_messages.push(("system".to_string(), "Chat mode active. Type a message and press Enter.".to_string()));
+                        self.chat_messages.push((
+                            "system".to_string(),
+                            "Chat mode active. Type a message and press Enter.".to_string(),
+                        ));
                     }
                     Some(3) => { /* Benchmarks */ }
                     Some(4) => { /* More trials */ }
@@ -734,19 +852,17 @@ impl App {
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => self.menu_up(),
             KeyCode::Down | KeyCode::Char('j') => self.menu_down(),
-            KeyCode::Enter => {
-                match self.menu_state.selected() {
-                    Some(0) | Some(1) => {
-                        self.status_message = "Model export complete!".to_string();
-                        self.screen = Screen::TrialActions;
-                        self.menu_state.select(Some(0));
-                    }
-                    _ => {
-                        self.screen = Screen::TrialActions;
-                        self.menu_state.select(Some(0));
-                    }
+            KeyCode::Enter => match self.menu_state.selected() {
+                Some(0) | Some(1) => {
+                    self.status_message = "Model export complete!".to_string();
+                    self.screen = Screen::TrialActions;
+                    self.menu_state.select(Some(0));
                 }
-            }
+                _ => {
+                    self.screen = Screen::TrialActions;
+                    self.menu_state.select(Some(0));
+                }
+            },
             KeyCode::Esc => {
                 self.screen = Screen::TrialActions;
                 self.menu_state.select(Some(0));
@@ -761,39 +877,33 @@ impl App {
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => self.menu_up(),
             KeyCode::Down | KeyCode::Char('j') => self.menu_down(),
-            KeyCode::Enter => {
-                match (self.menu_state.selected(), &action) {
-                    (Some(0), ConfirmAction::Quit) => self.should_quit = true,
-                    (Some(0), ConfirmAction::StopProcessing) => {
-                        self.is_processing = false;
-                        if !self.trials.is_empty() || self.current_trial > 0 {
-                            self.generate_demo_results();
-                            self.switch_to_results();
-                        } else {
-                            self.go_back_to_splash();
-                        }
-                    }
-                    _ => {
-                        self.screen = Screen::Processing;
-                    }
-                }
-            }
-            KeyCode::Esc | KeyCode::Char('n') => {
-                match action {
-                    ConfirmAction::StopProcessing => self.screen = Screen::Processing,
-                    ConfirmAction::Quit => self.go_back_to_splash(),
-                }
-            }
-            KeyCode::Char('y') => {
-                match action {
-                    ConfirmAction::Quit => self.should_quit = true,
-                    ConfirmAction::StopProcessing => {
-                        self.is_processing = false;
+            KeyCode::Enter => match (self.menu_state.selected(), &action) {
+                (Some(0), ConfirmAction::Quit) => self.should_quit = true,
+                (Some(0), ConfirmAction::StopProcessing) => {
+                    self.is_processing = false;
+                    if !self.trials.is_empty() || self.current_trial > 0 {
                         self.generate_demo_results();
                         self.switch_to_results();
+                    } else {
+                        self.go_back_to_splash();
                     }
                 }
-            }
+                _ => {
+                    self.screen = Screen::Processing;
+                }
+            },
+            KeyCode::Esc | KeyCode::Char('n') => match action {
+                ConfirmAction::StopProcessing => self.screen = Screen::Processing,
+                ConfirmAction::Quit => self.go_back_to_splash(),
+            },
+            KeyCode::Char('y') => match action {
+                ConfirmAction::Quit => self.should_quit = true,
+                ConfirmAction::StopProcessing => {
+                    self.is_processing = false;
+                    self.generate_demo_results();
+                    self.switch_to_results();
+                }
+            },
             _ => {}
         }
     }
@@ -826,8 +936,13 @@ impl App {
                     // It's the "Back" button
                     self.screen = Screen::Setup;
                     self.current_menu = vec![
-                        MenuItem::new("Enter Model ID/Path", "Type a Hugging Face model ID or local path").with_key("M"),
-                        MenuItem::new("Recent Models", "Choose from previously used models").with_key("R"),
+                        MenuItem::new(
+                            "Enter Model ID/Path",
+                            "Type a Hugging Face model ID or local path",
+                        )
+                        .with_key("M"),
+                        MenuItem::new("Recent Models", "Choose from previously used models")
+                            .with_key("R"),
                         MenuItem::new("Back", "Return to main menu").with_key("Esc"),
                     ];
                     self.menu_state.select(Some(1));
@@ -836,8 +951,13 @@ impl App {
             KeyCode::Esc => {
                 self.screen = Screen::Setup;
                 self.current_menu = vec![
-                    MenuItem::new("Enter Model ID/Path", "Type a Hugging Face model ID or local path").with_key("M"),
-                    MenuItem::new("Recent Models", "Choose from previously used models").with_key("R"),
+                    MenuItem::new(
+                        "Enter Model ID/Path",
+                        "Type a Hugging Face model ID or local path",
+                    )
+                    .with_key("M"),
+                    MenuItem::new("Recent Models", "Choose from previously used models")
+                        .with_key("R"),
                     MenuItem::new("Back", "Return to main menu").with_key("Esc"),
                 ];
                 self.menu_state.select(Some(1));
@@ -865,7 +985,8 @@ impl App {
     fn go_back_to_splash(&mut self) {
         self.screen = Screen::Splash;
         self.current_menu = vec![
-            MenuItem::new("Start Decensoring", "Launch the annihilation workflow").with_key("Enter"),
+            MenuItem::new("Start Decensoring", "Launch the annihilation workflow")
+                .with_key("Enter"),
             MenuItem::new("Configuration", "Edit settings before running").with_key("C"),
             MenuItem::new("About", "View project information").with_key("A"),
             MenuItem::new("Quit", "Exit the application").with_key("Q"),
@@ -889,12 +1010,16 @@ impl App {
         self.sys_info.refresh_ram();
         self.batch_size = 16;
 
-        self.log_lines.push(("Verifying Python Environment and Missing Dependencies...".to_string(), LogLevel::Info));
+        self.log_lines.push((
+            "Verifying Python Environment and Missing Dependencies...".to_string(),
+            LogLevel::Info,
+        ));
 
         // Save to recent models
         if !self.model_input.is_empty() {
             let recent_file = crate::subprocess::get_repo_root().join(".recent_models");
-            let mut recent: Vec<String> = std::fs::read_to_string(&recent_file).unwrap_or_default()
+            let mut recent: Vec<String> = std::fs::read_to_string(&recent_file)
+                .unwrap_or_default()
                 .lines()
                 .map(|s| s.to_string())
                 .filter(|s| !s.is_empty())
@@ -905,23 +1030,36 @@ impl App {
             let _ = std::fs::write(&recent_file, recent.join("\n"));
         }
 
-        self.subprocess = Some(SubprocessManager::spawn_setup(self.sys_info.gpu_name != "Unknown"));
+        self.subprocess = Some(SubprocessManager::spawn_setup(
+            self.sys_info.gpu_name != "Unknown",
+        ));
     }
 
     fn check_and_start_processing(&mut self) {
         let checkpoint_dir = crate::subprocess::get_repo_root().join("checkpoints");
-        
+
         // Sanitize model name exactly like python backend does
-        let sanitized_model: String = self.model_input.chars()
-            .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c.to_string() } else { "--".to_string() })
+        let sanitized_model: String = self
+            .model_input
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '_' || c == '-' {
+                    c.to_string()
+                } else {
+                    "--".to_string()
+                }
+            })
             .collect();
-            
+
         let checkpoint_file = checkpoint_dir.join(format!("{}.jsonl", sanitized_model));
-        
+
         if checkpoint_file.exists() {
             self.screen = Screen::CheckpointPrompt;
             self.current_menu = vec![
-                MenuItem::new("Resume previous run", "Continue optimization from the saved checkpoint"),
+                MenuItem::new(
+                    "Resume previous run",
+                    "Continue optimization from the saved checkpoint",
+                ),
                 MenuItem::new("Start fresh", "Delete previous checkpoint and start over"),
                 MenuItem::new("Cancel", "Go back"),
             ];
@@ -943,13 +1081,21 @@ impl App {
                     }
                     Some(1) => {
                         // Start fresh
-                        let sanitized_model: String = self.model_input.chars()
-                            .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c.to_string() } else { "--".to_string() })
+                        let sanitized_model: String = self
+                            .model_input
+                            .chars()
+                            .map(|c| {
+                                if c.is_alphanumeric() || c == '_' || c == '-' {
+                                    c.to_string()
+                                } else {
+                                    "--".to_string()
+                                }
+                            })
                             .collect();
                         let checkpoint_file = crate::subprocess::get_repo_root()
                             .join("checkpoints")
                             .join(format!("{}.jsonl", sanitized_model));
-                        
+
                         if checkpoint_file.exists() {
                             let _ = std::fs::remove_file(checkpoint_file);
                         }
@@ -982,19 +1128,46 @@ impl App {
 
         match &self.screen.clone() {
             Screen::Splash => self.render_splash(frame, area),
-            Screen::Setup => self.render_menu_screen(frame, area, "MODEL SETUP", "Select how to specify your model:"),
+            Screen::Setup => self.render_menu_screen(
+                frame,
+                area,
+                "MODEL SETUP",
+                "Select how to specify your model:",
+            ),
             Screen::ModelInput => self.render_model_input(frame, area),
-            Screen::ConfigSelect => self.render_menu_screen(frame, area, "CONFIGURATION", "Choose an optimization preset:"),
+            Screen::ConfigSelect => self.render_menu_screen(
+                frame,
+                area,
+                "CONFIGURATION",
+                "Choose an optimization preset:",
+            ),
             Screen::Processing => self.render_processing(frame, area),
             Screen::Results => self.render_results(frame, area),
-            Screen::TrialActions => self.render_menu_screen(frame, area, "TRIAL ACTIONS", "What do you want to do with the decensored model?"),
+            Screen::TrialActions => self.render_menu_screen(
+                frame,
+                area,
+                "TRIAL ACTIONS",
+                "What do you want to do with the decensored model?",
+            ),
             Screen::Chat => self.render_chat(frame, area),
-            Screen::Export => self.render_menu_screen(frame, area, "EXPORT MODEL", "Choose export strategy:"),
+            Screen::Export => {
+                self.render_menu_screen(frame, area, "EXPORT MODEL", "Choose export strategy:")
+            }
             Screen::CheckpointPrompt => {
-                self.render_menu_screen(frame, area, "MODEL SETUP", "Select how to specify your model:");
+                self.render_menu_screen(
+                    frame,
+                    area,
+                    "MODEL SETUP",
+                    "Select how to specify your model:",
+                );
                 self.render_checkpoint_prompt_dialog(frame, area);
-            },
-            Screen::RecentModels => self.render_menu_screen(frame, area, "RECENT MODELS", "Select a previously used model:"),
+            }
+            Screen::RecentModels => self.render_menu_screen(
+                frame,
+                area,
+                "RECENT MODELS",
+                "Select a previously used model:",
+            ),
             Screen::Confirm(action) => {
                 // Render previous screen dimmed, then overlay
                 match action {
@@ -1016,12 +1189,12 @@ impl App {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(2),     // top padding
-                Constraint::Length(7),     // banner
-                Constraint::Length(2),     // tagline
-                Constraint::Length(1),     // spacer
-                Constraint::Min(6),        // menu
-                Constraint::Length(1),     // status bar
+                Constraint::Length(2), // top padding
+                Constraint::Length(7), // banner
+                Constraint::Length(2), // tagline
+                Constraint::Length(1), // spacer
+                Constraint::Min(6),    // menu
+                Constraint::Length(1), // status bar
             ])
             .split(area);
 
@@ -1052,11 +1225,7 @@ impl App {
                             )
                         } else {
                             let s = (t - 0.5) * 2.0;
-                            (
-                                (191.0 + s * 64.0) as u8,
-                                0u8,
-                                255u8,
-                            )
+                            ((191.0 + s * 64.0) as u8, 0u8, 255u8)
                         };
 
                         let color = ratatui::style::Color::Rgb(r, g, b);
@@ -1083,7 +1252,9 @@ impl App {
         let tagline_color = ratatui::style::Color::Rgb(glow_intensity, 200, 255);
         let tagline = Paragraph::new(Line::from(Span::styled(
             TAGLINE,
-            Style::default().fg(tagline_color).add_modifier(Modifier::ITALIC),
+            Style::default()
+                .fg(tagline_color)
+                .add_modifier(Modifier::ITALIC),
         )))
         .alignment(Alignment::Center);
         frame.render_widget(tagline, chunks[2]);
@@ -1098,11 +1269,11 @@ impl App {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),     // title
-                Constraint::Length(2),     // subtitle
-                Constraint::Length(1),     // spacer
-                Constraint::Min(6),        // menu
-                Constraint::Length(1),     // status bar
+                Constraint::Length(3), // title
+                Constraint::Length(2), // subtitle
+                Constraint::Length(1), // spacer
+                Constraint::Min(6),    // menu
+                Constraint::Length(1), // status bar
             ])
             .split(area);
 
@@ -1113,7 +1284,11 @@ impl App {
             Span::styled(" ⚔  ", Style::default().fg(theme::NEON_MAGENTA)),
         ]))
         .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(theme::BORDER_INACTIVE)));
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
+        );
         frame.render_widget(title_widget, chunks[0]);
 
         // Subtitle
@@ -1129,9 +1304,11 @@ impl App {
 
     fn render_selection_menu(&mut self, frame: &mut Frame, area: Rect) {
         let menu_width = 60.min(area.width.saturating_sub(4));
-        let menu_area = centered_rect_fixed(menu_width, self.current_menu.len() as u16 * 3 + 2, area);
+        let menu_area =
+            centered_rect_fixed(menu_width, self.current_menu.len() as u16 * 3 + 2, area);
 
-        let items: Vec<ListItem> = self.current_menu
+        let items: Vec<ListItem> = self
+            .current_menu
             .iter()
             .enumerate()
             .map(|(i, item)| {
@@ -1140,29 +1317,49 @@ impl App {
                 let prefix = if is_selected { "▸ " } else { "  " };
 
                 let mut spans = vec![
-                    Span::styled(prefix, if is_selected {
-                        Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(theme::TEXT_DIM)
-                    }),
-                    Span::styled(&item.label, if is_selected {
-                        Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(theme::TEXT_PRIMARY)
-                    }),
+                    Span::styled(
+                        prefix,
+                        if is_selected {
+                            Style::default()
+                                .fg(theme::NEON_CYAN)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(theme::TEXT_DIM)
+                        },
+                    ),
+                    Span::styled(
+                        &item.label,
+                        if is_selected {
+                            Style::default()
+                                .fg(theme::NEON_CYAN)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(theme::TEXT_PRIMARY)
+                        },
+                    ),
                 ];
 
                 if let Some(key) = &item.key_hint {
                     spans.push(Span::styled(
                         format!("  [{}]", key),
-                        Style::default().fg(if is_selected { theme::NEON_PURPLE } else { theme::TEXT_DIM }),
+                        Style::default().fg(if is_selected {
+                            theme::NEON_PURPLE
+                        } else {
+                            theme::TEXT_DIM
+                        }),
                     ));
                 }
 
                 let main_line = Line::from(spans);
                 let desc_line = Line::from(Span::styled(
                     format!("    {}", item.description),
-                    Style::default().fg(if is_selected { theme::BORDER_ACTIVE } else { theme::TEXT_DIM }).add_modifier(Modifier::ITALIC),
+                    Style::default()
+                        .fg(if is_selected {
+                            theme::BORDER_ACTIVE
+                        } else {
+                            theme::TEXT_DIM
+                        })
+                        .add_modifier(Modifier::ITALIC),
                 ));
 
                 ListItem::new(vec![main_line, desc_line, Line::from("")])
@@ -1175,16 +1372,26 @@ impl App {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(theme::BORDER_ACTIVE))
-                    .title(Span::styled(" Select ", Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)))
+                    .title(Span::styled(
+                        " Select ",
+                        Style::default()
+                            .fg(theme::NEON_CYAN)
+                            .add_modifier(Modifier::BOLD),
+                    ))
                     .title_alignment(Alignment::Center)
-                    .style(Style::default().bg(theme::BG_SURFACE))
+                    .style(Style::default().bg(theme::BG_SURFACE)),
             )
             .highlight_style(Style::default()); // We handle highlighting manually
 
         frame.render_stateful_widget(list, menu_area, &mut self.menu_state);
 
         // Key hints below menu
-        let hint_area = Rect::new(menu_area.x, menu_area.y + menu_area.height, menu_area.width, 1);
+        let hint_area = Rect::new(
+            menu_area.x,
+            menu_area.y + menu_area.height,
+            menu_area.width,
+            1,
+        );
         if hint_area.y < area.y + area.height {
             let hints = Paragraph::new(Line::from(vec![
                 Span::styled(" ↑↓ ", theme::key_hint_style()),
@@ -1221,7 +1428,11 @@ impl App {
             Span::styled(" ⚔  ", Style::default().fg(theme::NEON_MAGENTA)),
         ]))
         .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(theme::BORDER_INACTIVE)));
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
+        );
         frame.render_widget(title, chunks[0]);
 
         let sub = Paragraph::new(Line::from(Span::styled(
@@ -1244,18 +1455,24 @@ impl App {
         let input_style = if self.model_input.is_empty() {
             Style::default().fg(theme::TEXT_DIM)
         } else {
-            Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::NEON_CYAN)
+                .add_modifier(Modifier::BOLD)
         };
 
-        let input = Paragraph::new(Line::from(Span::styled(&display_text, input_style)))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(theme::NEON_CYAN))
-                    .title(Span::styled(" Model ", Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)))
-                    .style(Style::default().bg(theme::BG_SURFACE)),
-            );
+        let input = Paragraph::new(Line::from(Span::styled(&display_text, input_style))).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(theme::NEON_CYAN))
+                .title(Span::styled(
+                    " Model ",
+                    Style::default()
+                        .fg(theme::NEON_CYAN)
+                        .add_modifier(Modifier::BOLD),
+                ))
+                .style(Style::default().bg(theme::BG_SURFACE)),
+        );
         frame.render_widget(input, input_area);
 
         // Show cursor
@@ -1285,22 +1502,27 @@ impl App {
         let main_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
-            .split(Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1)));
+            .split(Rect::new(
+                area.x,
+                area.y,
+                area.width,
+                area.height.saturating_sub(1),
+            ));
 
         let left_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(7),   // header + progress
-                Constraint::Length(16),  // metrics
-                Constraint::Min(5),      // log
+                Constraint::Length(7),  // header + progress
+                Constraint::Length(16), // metrics
+                Constraint::Min(5),     // log
             ])
             .split(main_chunks[0]);
 
         let right_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(10),  // system info
-                Constraint::Min(5),      // controls
+                Constraint::Length(10), // system info
+                Constraint::Min(5),     // controls
             ])
             .split(main_chunks[1]);
 
@@ -1329,7 +1551,11 @@ impl App {
         let model_line = Line::from(vec![
             Span::styled(" Model: ", theme::dim_style()),
             Span::styled(
-                if self.model_input.is_empty() { "demo-model" } else { &self.model_input },
+                if self.model_input.is_empty() {
+                    "demo-model"
+                } else {
+                    &self.model_input
+                },
                 theme::highlight_value(),
             ),
         ]);
@@ -1345,14 +1571,18 @@ impl App {
             .gauge_style(theme::gauge_style())
             .label(Span::styled(
                 format!(" Trials: {}/{} ", self.current_trial, self.total_trials),
-                Style::default().fg(theme::TEXT_BRIGHT).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::TEXT_BRIGHT)
+                    .add_modifier(Modifier::BOLD),
             ))
             .ratio(progress_ratio);
         frame.render_widget(gauge, progress_lines[1]);
 
         // Timing
         let elapsed_str = format_duration(self.elapsed_secs);
-        let eta_str = self.eta_secs.map_or("calculating...".to_string(), format_duration);
+        let eta_str = self
+            .eta_secs
+            .map_or("calculating...".to_string(), format_duration);
         let time_line = Line::from(vec![
             Span::styled(" Elapsed: ", theme::dim_style()),
             Span::styled(&elapsed_str, theme::highlight_value()),
@@ -1384,9 +1614,11 @@ impl App {
             ])
             .split(metrics_inner);
 
-        let refusal_str = self.best_refusals
+        let refusal_str = self
+            .best_refusals
             .map_or("--".to_string(), |r| format!("{}/100", r));
-        let kl_str = self.best_kl
+        let kl_str = self
+            .best_kl
             .map_or("--".to_string(), |k| format!("{:.4}", k));
 
         let refusal_line = Line::from(vec![
@@ -1403,28 +1635,33 @@ impl App {
 
         // Draw Sparklines ("spike graphs") instead of braille dots
         if !self.kl_history.is_empty() {
-            let kl_sparkline_data: Vec<u64> = self.kl_history.iter().map(|&v| (v * 10000.0) as u64).collect();
+            let kl_sparkline_data: Vec<u64> = self
+                .kl_history
+                .iter()
+                .map(|&v| (v * 10000.0) as u64)
+                .collect();
             let max_val = kl_sparkline_data.iter().max().cloned().unwrap_or(0);
-            
+
             let kl_sparkline = Sparkline::default()
                 .block(Block::default().title(Span::styled(" KL Div ", theme::dim_style())))
                 .style(Style::default().fg(theme::NEON_CYAN))
                 .data(&kl_sparkline_data)
                 .max(max_val.max(1));
-            
+
             frame.render_widget(kl_sparkline, metric_lines[3]);
         }
 
         if !self.refusal_history.is_empty() {
-            let ref_sparkline_data: Vec<u64> = self.refusal_history.iter().map(|&v| v as u64).collect();
+            let ref_sparkline_data: Vec<u64> =
+                self.refusal_history.iter().map(|&v| v as u64).collect();
             let max_val = ref_sparkline_data.iter().max().cloned().unwrap_or(0);
-            
+
             let ref_sparkline = Sparkline::default()
                 .block(Block::default().title(Span::styled(" Refusals ", theme::dim_style())))
                 .style(Style::default().fg(theme::NEON_GREEN))
                 .data(&ref_sparkline_data)
                 .max(max_val.max(1));
-            
+
             frame.render_widget(ref_sparkline, metric_lines[5]);
         }
 
@@ -1440,7 +1677,7 @@ impl App {
         frame.render_widget(log_block, left_chunks[2]);
 
         let visible_lines = log_inner.height as usize;
-        
+
         if self.log_auto_scroll {
             self.log_scroll = self.log_lines.len().saturating_sub(visible_lines);
         } else {
@@ -1451,7 +1688,7 @@ impl App {
                 self.log_auto_scroll = true;
             }
         }
-        
+
         let start = self.log_scroll;
         let end = (start + visible_lines).min(self.log_lines.len());
 
@@ -1477,7 +1714,10 @@ impl App {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(theme::BORDER_INACTIVE))
-            .title(Span::styled(" SYSTEM ", Style::default().fg(theme::TEXT_DIM)))
+            .title(Span::styled(
+                " SYSTEM ",
+                Style::default().fg(theme::TEXT_DIM),
+            ))
             .style(Style::default().bg(theme::BG_SURFACE));
 
         let sys_inner = sys_block.inner(right_chunks[0]);
@@ -1486,19 +1726,30 @@ impl App {
         let sys_lines: Vec<Line> = vec![
             Line::from(vec![
                 Span::styled(" GPU: ", theme::dim_style()),
-                Span::styled(&self.sys_info.gpu_name, Style::default().fg(theme::NEON_PURPLE)),
+                Span::styled(
+                    &self.sys_info.gpu_name,
+                    Style::default().fg(theme::NEON_PURPLE),
+                ),
             ]),
             Line::from(vec![
                 Span::styled(" VRAM: ", theme::dim_style()),
                 Span::styled(
-                    format!("{:.1}/{:.0} GB", self.sys_info.vram_used_gb(), self.sys_info.vram_total_gb()),
+                    format!(
+                        "{:.1}/{:.0} GB",
+                        self.sys_info.vram_used_gb(),
+                        self.sys_info.vram_total_gb()
+                    ),
                     theme::highlight_value(),
                 ),
             ]),
             Line::from(vec![
                 Span::styled(" RAM: ", theme::dim_style()),
                 Span::styled(
-                    format!("{:.1}/{:.0} GB", self.sys_info.ram_used_gb(), self.sys_info.ram_total_gb()),
+                    format!(
+                        "{:.1}/{:.0} GB",
+                        self.sys_info.ram_used_gb(),
+                        self.sys_info.ram_total_gb()
+                    ),
                     theme::highlight_value(),
                 ),
             ]),
@@ -1508,7 +1759,10 @@ impl App {
             ]),
             Line::from(vec![
                 Span::styled(" Tok/s: ", theme::dim_style()),
-                Span::styled(format!("{:.0}", self.tokens_per_sec), Style::default().fg(theme::NEON_GREEN)),
+                Span::styled(
+                    format!("{:.0}", self.tokens_per_sec),
+                    Style::default().fg(theme::NEON_GREEN),
+                ),
             ]),
         ];
 
@@ -1520,7 +1774,10 @@ impl App {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(theme::BORDER_INACTIVE))
-            .title(Span::styled(" CONTROLS ", Style::default().fg(theme::TEXT_DIM)))
+            .title(Span::styled(
+                " CONTROLS ",
+                Style::default().fg(theme::TEXT_DIM),
+            ))
             .style(Style::default().bg(theme::BG_SURFACE));
 
         let ctrl_inner = ctrl_block.inner(right_chunks[1]);
@@ -1552,11 +1809,11 @@ impl App {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // title
-                Constraint::Length(2),  // info
-                Constraint::Min(8),     // trial list
-                Constraint::Length(3),  // hints
-                Constraint::Length(1),  // status
+                Constraint::Length(3), // title
+                Constraint::Length(2), // info
+                Constraint::Min(8),    // trial list
+                Constraint::Length(3), // hints
+                Constraint::Length(1), // status
             ])
             .split(area);
 
@@ -1567,7 +1824,11 @@ impl App {
             Span::styled(" ✨  ", Style::default().fg(theme::NEON_GREEN)),
         ]))
         .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(theme::BORDER_INACTIVE)));
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
+        );
         frame.render_widget(title, chunks[0]);
 
         // Info text
@@ -1584,10 +1845,15 @@ impl App {
 
         // Header
         let header = Row::new(vec!["Trial", "Refusals", "KL Div", "Direction"])
-            .style(Style::default().fg(theme::NEON_PURPLE).add_modifier(Modifier::BOLD | Modifier::UNDERLINED))
+            .style(
+                Style::default()
+                    .fg(theme::NEON_PURPLE)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            )
             .bottom_margin(1);
 
-        let rows: Vec<Row> = self.trials
+        let rows: Vec<Row> = self
+            .trials
             .iter()
             .map(|trial| {
                 let kl_color = if trial.kl_divergence > 0.5 {
@@ -1608,33 +1874,41 @@ impl App {
 
                 Row::new(vec![
                     Cell::from(format!("{}", trial.index)),
-                    Cell::from(format!("{}/{}", trial.refusals, trial.total_prompts)).style(Style::default().fg(refusal_color)),
-                    Cell::from(format!("{:.4}", trial.kl_divergence)).style(Style::default().fg(kl_color)),
+                    Cell::from(format!("{}/{}", trial.refusals, trial.total_prompts))
+                        .style(Style::default().fg(refusal_color)),
+                    Cell::from(format!("{:.4}", trial.kl_divergence))
+                        .style(Style::default().fg(kl_color)),
                     Cell::from(trial.direction.clone()).style(theme::dim_style()),
                 ])
             })
             .collect();
 
-        let trial_table = Table::new(rows, [
-            Constraint::Length(10), // Trial
-            Constraint::Length(15), // Refusals
-            Constraint::Length(15), // KL Div
-            Constraint::Min(20),    // Direction
-        ])
+        let trial_table = Table::new(
+            rows,
+            [
+                Constraint::Length(10), // Trial
+                Constraint::Length(15), // Refusals
+                Constraint::Length(15), // KL Div
+                Constraint::Min(20),    // Direction
+            ],
+        )
         .header(header)
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(theme::BORDER_ACTIVE))
-                .title(Span::styled(" Pareto Optimal Trials ", theme::title_style()))
-                .style(Style::default().bg(theme::BG_SURFACE))
+                .title(Span::styled(
+                    " Pareto Optimal Trials ",
+                    theme::title_style(),
+                ))
+                .style(Style::default().bg(theme::BG_SURFACE)),
         )
         .row_highlight_style(
             Style::default()
                 .bg(theme::BG_DARK)
                 .fg(theme::NEON_CYAN)
-                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol(" ▸ ");
 
@@ -1659,10 +1933,10 @@ impl App {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // title
-                Constraint::Min(5),     // messages
-                Constraint::Length(3),  // input
-                Constraint::Length(1),  // status
+                Constraint::Length(3), // title
+                Constraint::Min(5),    // messages
+                Constraint::Length(3), // input
+                Constraint::Length(1), // status
             ])
             .split(area);
 
@@ -1672,34 +1946,45 @@ impl App {
             Span::styled("CHAT WITH DECENSORED MODEL", theme::title_style()),
         ]))
         .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(theme::BORDER_INACTIVE)));
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
+        );
         frame.render_widget(title, chunks[0]);
 
         // Messages
-        let msg_lines: Vec<Line> = self.chat_messages.iter().flat_map(|(role, content)| {
-            let (prefix, style) = match role.as_str() {
-                "user" => ("▸ You: ", Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)),
-                "assistant" => ("▸ AI:  ", Style::default().fg(theme::NEON_MAGENTA)),
-                _ => ("▸ Sys: ", theme::dim_style()),
-            };
-            vec![
-                Line::from(vec![
-                    Span::styled(prefix, style),
-                    Span::styled(content.clone(), Style::default().fg(theme::TEXT_PRIMARY)),
-                ]),
-                Line::from(""),
-            ]
-        }).collect();
+        let msg_lines: Vec<Line> = self
+            .chat_messages
+            .iter()
+            .flat_map(|(role, content)| {
+                let (prefix, style) = match role.as_str() {
+                    "user" => (
+                        "▸ You: ",
+                        Style::default()
+                            .fg(theme::NEON_CYAN)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    "assistant" => ("▸ AI:  ", Style::default().fg(theme::NEON_MAGENTA)),
+                    _ => ("▸ Sys: ", theme::dim_style()),
+                };
+                vec![
+                    Line::from(vec![
+                        Span::styled(prefix, style),
+                        Span::styled(content.clone(), Style::default().fg(theme::TEXT_PRIMARY)),
+                    ]),
+                    Line::from(""),
+                ]
+            })
+            .collect();
 
-        let messages = Paragraph::new(msg_lines)
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(theme::BORDER_INACTIVE))
-                    .style(Style::default().bg(theme::BG_SURFACE)),
-            );
+        let messages = Paragraph::new(msg_lines).wrap(Wrap { trim: false }).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                .style(Style::default().bg(theme::BG_SURFACE)),
+        );
         frame.render_widget(messages, chunks[1]);
 
         // Input
@@ -1714,15 +1999,14 @@ impl App {
             Style::default().fg(theme::NEON_CYAN)
         };
 
-        let input = Paragraph::new(Line::from(Span::styled(input_text, input_style)))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(theme::NEON_CYAN))
-                    .title(Span::styled(" Message ", theme::title_style()))
-                    .style(Style::default().bg(theme::BG_SURFACE)),
-            );
+        let input = Paragraph::new(Line::from(Span::styled(input_text, input_style))).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(theme::NEON_CYAN))
+                .title(Span::styled(" Message ", theme::title_style()))
+                .style(Style::default().bg(theme::BG_SURFACE)),
+        );
         frame.render_widget(input, chunks[2]);
 
         // Cursor
@@ -1741,31 +2025,36 @@ impl App {
         // Clear background
         frame.render_widget(Clear, dialog_area);
 
-        let items: Vec<ListItem> = self.current_menu
+        let items: Vec<ListItem> = self
+            .current_menu
             .iter()
             .enumerate()
             .map(|(i, item)| {
                 let is_selected = self.menu_state.selected() == Some(i);
                 let prefix = if is_selected { " ▸ " } else { "   " };
                 let style = if is_selected {
-                    Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme::NEON_CYAN)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(theme::TEXT_PRIMARY)
                 };
-                ListItem::new(Line::from(Span::styled(format!("{}{}", prefix, item.label), style)))
+                ListItem::new(Line::from(Span::styled(
+                    format!("{}{}", prefix, item.label),
+                    style,
+                )))
             })
             .collect();
 
-        let dialog = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Double)
-                    .border_style(Style::default().fg(theme::NEON_AMBER))
-                    .title(Span::styled(" ⚠ Confirm ", theme::warning_style()))
-                    .title_alignment(Alignment::Center)
-                    .style(Style::default().bg(theme::BG_ELEVATED)),
-            );
+        let dialog = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Double)
+                .border_style(Style::default().fg(theme::NEON_AMBER))
+                .title(Span::styled(" ⚠ Confirm ", theme::warning_style()))
+                .title_alignment(Alignment::Center)
+                .style(Style::default().bg(theme::BG_ELEVATED)),
+        );
         frame.render_stateful_widget(dialog, dialog_area, &mut self.menu_state);
     }
 
@@ -1776,31 +2065,36 @@ impl App {
 
         frame.render_widget(Clear, dialog_area);
 
-        let items: Vec<ListItem> = self.current_menu
+        let items: Vec<ListItem> = self
+            .current_menu
             .iter()
             .enumerate()
             .map(|(i, item)| {
                 let is_selected = self.menu_state.selected() == Some(i);
                 let prefix = if is_selected { " ▸ " } else { "   " };
                 let style = if is_selected {
-                    Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme::NEON_CYAN)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(theme::TEXT_PRIMARY)
                 };
-                ListItem::new(Line::from(Span::styled(format!("{}{}", prefix, item.label), style)))
+                ListItem::new(Line::from(Span::styled(
+                    format!("{}{}", prefix, item.label),
+                    style,
+                )))
             })
             .collect();
 
-        let dialog = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Double)
-                    .border_style(Style::default().fg(theme::NEON_AMBER))
-                    .title(Span::styled(" ⚠ Checkpoint Found ", theme::warning_style()))
-                    .title_alignment(Alignment::Center)
-                    .style(Style::default().bg(theme::BG_ELEVATED)),
-            );
+        let dialog = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Double)
+                .border_style(Style::default().fg(theme::NEON_AMBER))
+                .title(Span::styled(" ⚠ Checkpoint Found ", theme::warning_style()))
+                .title_alignment(Alignment::Center)
+                .style(Style::default().bg(theme::BG_ELEVATED)),
+        );
         frame.render_stateful_widget(dialog, dialog_area, &mut self.menu_state);
     }
 
@@ -1828,9 +2122,17 @@ impl App {
             .split(inner_area);
 
         // Logo
-        let logo_lines: Vec<Line> = BANNER.iter().map(|&s| {
-            Line::from(Span::styled(s, Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)))
-        }).collect();
+        let logo_lines: Vec<Line> = BANNER
+            .iter()
+            .map(|&s| {
+                Line::from(Span::styled(
+                    s,
+                    Style::default()
+                        .fg(theme::NEON_CYAN)
+                        .add_modifier(Modifier::BOLD),
+                ))
+            })
+            .collect();
         let logo = Paragraph::new(logo_lines).alignment(Alignment::Center);
         frame.render_widget(logo, layout[0]);
 
@@ -1840,25 +2142,47 @@ impl App {
             Line::from(""),
             Line::from(vec![
                 Span::styled("Author: ", Style::default().fg(theme::TEXT_DIM)),
-                Span::styled("tjcrims0nx", Style::default().fg(theme::NEON_MAGENTA).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "tjcrims0nx",
+                    Style::default()
+                        .fg(theme::NEON_MAGENTA)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ]),
             Line::from(vec![
                 Span::styled("GitHub: ", Style::default().fg(theme::TEXT_DIM)),
-                Span::styled("https://github.com/tjcrims0nx/annihilation-llm", Style::default().fg(theme::NEON_CYAN)),
+                Span::styled(
+                    "https://github.com/tjcrims0nx/annihilation-llm",
+                    Style::default().fg(theme::NEON_CYAN),
+                ),
             ]),
             Line::from(""),
-            Line::from(Span::styled("An advanced orthogonal representation ablation framework designed to", Style::default().fg(theme::TEXT_PRIMARY))),
-            Line::from(Span::styled("systematically identify and zero-out structural refusal vectors in LLMs.", Style::default().fg(theme::TEXT_PRIMARY))),
+            Line::from(Span::styled(
+                "An advanced orthogonal representation ablation framework designed to",
+                Style::default().fg(theme::TEXT_PRIMARY),
+            )),
+            Line::from(Span::styled(
+                "systematically identify and zero-out structural refusal vectors in LLMs.",
+                Style::default().fg(theme::TEXT_PRIMARY),
+            )),
             Line::from(""),
-            Line::from(Span::styled("Unchain your local models.", Style::default().fg(theme::NEON_AMBER).add_modifier(Modifier::ITALIC))),
+            Line::from(Span::styled(
+                "Unchain your local models.",
+                Style::default()
+                    .fg(theme::NEON_AMBER)
+                    .add_modifier(Modifier::ITALIC),
+            )),
         ];
-        
+
         let info_para = Paragraph::new(info_text).alignment(Alignment::Center);
         frame.render_widget(info_para, layout[2]);
 
         // Footer
-        let footer = Paragraph::new(Line::from(Span::styled("Press Esc or Enter to return", theme::dim_style())))
-            .alignment(Alignment::Center);
+        let footer = Paragraph::new(Line::from(Span::styled(
+            "Press Esc or Enter to return",
+            theme::dim_style(),
+        )))
+        .alignment(Alignment::Center);
         frame.render_widget(footer, layout[4]);
     }
 
@@ -1868,12 +2192,22 @@ impl App {
         let bar_area = Rect::new(area.x, area.y + area.height - 1, area.width, 1);
 
         let status_line = Line::from(vec![
-            Span::styled(" ANNIHILATE ", Style::default().fg(theme::BG_DARK).bg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " ANNIHILATE ",
+                Style::default()
+                    .fg(theme::BG_DARK)
+                    .bg(theme::NEON_CYAN)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" ", theme::status_bar_style()),
             Span::styled(&self.status_message, theme::status_bar_style()),
             Span::styled(
-                format!("{}v0.1.0 ",
-                    " ".repeat((area.width as usize).saturating_sub(self.status_message.len() + 20))),
+                format!(
+                    "{}v0.1.0 ",
+                    " ".repeat(
+                        (area.width as usize).saturating_sub(self.status_message.len() + 20)
+                    )
+                ),
                 theme::status_bar_style(),
             ),
         ]);

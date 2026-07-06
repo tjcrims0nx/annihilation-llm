@@ -98,9 +98,7 @@ pub fn accent_style() -> Style {
 
 /// Bold green for success messages and completion indicators.
 pub fn success_style() -> Style {
-    Style::default()
-        .fg(NEON_GREEN)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(NEON_GREEN).add_modifier(Modifier::BOLD)
 }
 
 /// Amber style for warning messages.
@@ -110,9 +108,7 @@ pub fn warning_style() -> Style {
 
 /// Bold red for error messages and critical alerts.
 pub fn error_style() -> Style {
-    Style::default()
-        .fg(NEON_RED)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(NEON_RED).add_modifier(Modifier::BOLD)
 }
 
 /// Dim text on surface background – used for the bottom status bar.
@@ -141,9 +137,7 @@ pub fn log_style() -> Style {
 
 /// Bold cyan for numeric / important values in status readouts.
 pub fn highlight_value() -> Style {
-    Style::default()
-        .fg(NEON_CYAN)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(NEON_CYAN).add_modifier(Modifier::BOLD)
 }
 
 /// Bold purple for keyboard shortcut indicators.
