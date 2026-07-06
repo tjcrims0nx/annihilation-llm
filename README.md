@@ -46,17 +46,10 @@ Once running, monitor everything in real-time. The dashboard features dynamic sp
 
 Ensure you have **Python 3.10+** and **Rust** installed, and that your PyTorch installation supports CUDA (if you are using an NVIDIA GPU).
 
-### Windows
+### Setup & Launch
 Just double-click the `start.bat` script in the root of the repository, or run it from the command line:
 ```powershell
 .\start.bat
-```
-
-### macOS / Linux
-Navigate into the `tui` directory and use Cargo to run the application in release mode:
-```bash
-cd tui
-cargo run --release
 ```
 
 ---
