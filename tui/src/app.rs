@@ -808,6 +808,15 @@ impl App {
                 self.log_scroll += 1;
                 // Bounds checking will happen in draw loop
             }
+            KeyCode::Char('c') | KeyCode::Char('C') => {
+                let log_text = self.log_lines.iter().map(|(msg, _)| msg.clone()).collect::<Vec<String>>().join("\n");
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    let _ = clipboard.set_text(log_text);
+                    self.log_lines.push(("Copied entire log to clipboard!".to_string(), LogLevel::Success));
+                } else {
+                    self.log_lines.push(("Failed to access clipboard.".to_string(), LogLevel::Error));
+                }
+            }
             _ => {}
         }
     }
@@ -1880,7 +1889,9 @@ impl App {
                 Span::styled(" Stop", theme::key_desc_style()),
             ]),
             Line::from(vec![
-                Span::styled("  ↑↓", theme::key_hint_style()),
+                Span::styled(" C ", theme::key_hint_style()),
+                Span::styled("Copy log  ", theme::key_desc_style()),
+                Span::styled("    ", theme::key_hint_style()),
                 Span::styled(" Scroll log", theme::key_desc_style()),
             ]),
             Line::from(vec![
