@@ -16,6 +16,8 @@ pub enum ParsedEvent {
     CalculatingDirections,
     /// Optimization starting
     OptimizationStarting { n_trials: usize },
+    /// Trial started
+    TrialStarting { trial_number: usize, total_trials: usize },
     /// A trial completed with metrics
     TrialComplete {
         trial_number: usize,
@@ -103,9 +105,33 @@ pub fn parse_line(raw: &str) -> ParsedEvent {
         return ParsedEvent::CalculatingDirections;
     }
 
-    // Optimization starting
-    if line.contains("Running") && line.contains("trial") {
-        // "Running trial 5 of 200"
+    // Trial starting
+    if line.contains("Running") && line.contains("trial") && line.contains("of") {
+        // "Running trial 5 of 200..."
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        let mut trial_num = 0;
+        let mut total_trials = 0;
+        
+        for (i, part) in parts.iter().enumerate() {
+            if part.contains("trial") && i + 1 < parts.len() {
+                if let Ok(n) = parts[i + 1].replace(',', "").parse() {
+                    trial_num = n;
+                }
+            }
+            if part.contains("of") && i + 1 < parts.len() {
+                let stripped: String = parts[i + 1].chars().filter(|c| c.is_ascii_digit()).collect();
+                if let Ok(n) = stripped.parse() {
+                    total_trials = n;
+                }
+            }
+        }
+        
+        if trial_num > 0 && total_trials > 0 {
+            return ParsedEvent::TrialStarting {
+                trial_number: trial_num,
+                total_trials,
+            };
+        }
         return ParsedEvent::Status(line.to_string());
     }
 

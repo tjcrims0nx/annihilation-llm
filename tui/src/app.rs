@@ -242,6 +242,11 @@ impl App {
                                 self.total_trials = n_trials;
                                 self.log_lines.push(("Starting optimization...".into(), LogLevel::Success));
                             }
+                            ParsedEvent::TrialStarting { trial_number, total_trials } => {
+                                self.current_trial = trial_number;
+                                self.total_trials = total_trials;
+                                self.log_lines.push((format!("Starting trial {}/{}...", trial_number, total_trials), LogLevel::Info));
+                            }
                             ParsedEvent::TrialComplete { trial_number, total_trials: _, refusals, total_prompts } => {
                                 if trial_number > 0 {
                                     self.current_trial = trial_number;
