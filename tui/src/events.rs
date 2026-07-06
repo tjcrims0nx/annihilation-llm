@@ -17,6 +17,9 @@ pub enum AppEvent {
     /// A keyboard event was received.
     Key(KeyEvent),
 
+    /// A mouse event was received.
+    Mouse(crossterm::event::MouseEvent),
+
     /// No meaningful event arrived within the tick window – use this to
     /// drive animations, status refreshes, and other periodic work.
     Tick,
@@ -37,6 +40,7 @@ pub enum AppEvent {
 /// loop {
 ///     match events.next().unwrap() {
 ///         AppEvent::Key(key) => { /* handle input */ }
+///         AppEvent::Mouse(mouse) => { /* handle mouse */ }
 ///         AppEvent::Tick      => { /* update state */ }
 ///         AppEvent::Resize(..) => { /* redraw */ }
 ///     }
@@ -58,12 +62,14 @@ impl EventHandler {
     /// Blocks for at most [`tick_rate`](Self) and returns the next event.
     ///
     /// * If a key press arrives → [`AppEvent::Key`]
+    /// * If a mouse event arrives → [`AppEvent::Mouse`]
     /// * If the terminal is resized → [`AppEvent::Resize`]
     /// * Otherwise (timeout **or** unhandled event) → [`AppEvent::Tick`]
     pub fn next(&self) -> Result<AppEvent> {
         if event::poll(self.tick_rate)? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => Ok(AppEvent::Key(key)),
+                Event::Mouse(mouse) => Ok(AppEvent::Mouse(mouse)),
                 Event::Resize(w, h) => Ok(AppEvent::Resize(w, h)),
                 _ => Ok(AppEvent::Tick),
             }

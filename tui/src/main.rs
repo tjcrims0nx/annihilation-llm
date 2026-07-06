@@ -18,6 +18,7 @@ use color_eyre::Result;
 use crossterm::{
     ExecutableCommand,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    event::{EnableMouseCapture, DisableMouseCapture},
 };
 use events::{AppEvent, EventHandler};
 use ratatui::prelude::*;
@@ -30,6 +31,7 @@ fn main() -> Result<()> {
     enable_raw_mode()?;
     io::stdout().execute(EnterAlternateScreen)?;
     io::stdout().execute(crossterm::cursor::Hide)?;
+    io::stdout().execute(EnableMouseCapture)?;
     io::stdout().execute(crossterm::terminal::Clear(crossterm::terminal::ClearType::All))?;
 
     let backend = CrosstermBackend::new(io::stdout());
@@ -42,6 +44,7 @@ fn main() -> Result<()> {
     // Restore terminal
     disable_raw_mode()?;
     io::stdout().execute(LeaveAlternateScreen)?;
+    io::stdout().execute(DisableMouseCapture)?;
     io::stdout().execute(crossterm::cursor::Show)?;
 
     result
@@ -61,6 +64,9 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
                 if app.handle_key(key) {
                     break; // App wants to quit
                 }
+            }
+            AppEvent::Mouse(mouse) => {
+                app.handle_mouse(mouse);
             }
             AppEvent::Tick => {
                 app.tick();

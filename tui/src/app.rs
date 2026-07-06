@@ -405,6 +405,31 @@ impl App {
         self.should_quit
     }
 
+    /// Handle mouse input — primarily for scrolling
+    pub fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
+        use crossterm::event::MouseEventKind;
+        
+        match self.screen {
+            Screen::Processing => {
+                match mouse.kind {
+                    MouseEventKind::ScrollUp => {
+                        if self.log_scroll > 0 {
+                            self.log_scroll = self.log_scroll.saturating_sub(1);
+                            self.log_auto_scroll = false;
+                        }
+                    }
+                    MouseEventKind::ScrollDown => {
+                        self.log_scroll += 1;
+                        // Bounds checking will happen in draw loop
+                    }
+                    _ => {}
+                }
+            }
+            // Add other screen mouse handling here if needed
+            _ => {}
+        }
+    }
+
     // ─── Splash Screen Keys ────────────────────────────────────
 
     fn handle_splash_key(&mut self, key: KeyEvent) {
