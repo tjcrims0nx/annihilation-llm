@@ -711,11 +711,14 @@ impl App {
         }
 
         // 2. Validate HuggingFace repo via lightweight python subprocess
+        // We accept HTTP 200 (public) and HTTP 401 (gated/private) as valid existence indicators.
         let script = format!(
-            "import urllib.request, sys\n\
+            "import urllib.request, urllib.error, sys\n\
              try:\n\
                  r = urllib.request.urlopen(f'https://huggingface.co/api/models/{{sys.argv[1]}}')\n\
-                 sys.exit(0 if r.getcode() == 200 else 1)\n\
+                 sys.exit(0)\n\
+             except urllib.error.HTTPError as e:\n\
+                 sys.exit(0 if e.code == 401 else 1)\n\
              except Exception:\n\
                  sys.exit(1)"
         );
