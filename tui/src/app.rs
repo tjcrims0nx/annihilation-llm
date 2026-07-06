@@ -121,6 +121,7 @@ pub struct App {
     pub best_kl: Option<f64>,
     pub log_lines: Vec<(String, LogLevel)>,
     pub log_scroll: usize,
+    pub log_auto_scroll: bool,
     pub elapsed_secs: u64,
     pub eta_secs: Option<u64>,
     pub sys_info: SystemInfo,
@@ -185,6 +186,7 @@ impl App {
             best_kl: None,
             log_lines: Vec::new(),
             log_scroll: 0,
+            log_auto_scroll: true,
             elapsed_secs: 0,
             eta_secs: None,
             sys_info: SystemInfo::detect(),
@@ -343,11 +345,6 @@ impl App {
                             self.log_lines.push((err, LogLevel::Error));
                         }
                     }
-                }
-                
-                // Keep scroll at bottom
-                if self.log_lines.len() > 10 {
-                    self.log_scroll = self.log_lines.len().saturating_sub(10);
                 }
 
                 // Refresh real system stats periodically
@@ -582,13 +579,13 @@ impl App {
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 if self.log_scroll > 0 {
-                    self.log_scroll -= 1;
+                    self.log_scroll = self.log_scroll.saturating_sub(1);
+                    self.log_auto_scroll = false;
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if self.log_scroll < self.log_lines.len().saturating_sub(1) {
-                    self.log_scroll += 1;
-                }
+                self.log_scroll += 1;
+                // Bounds checking will happen in draw loop
             }
             _ => {}
         }
@@ -1366,13 +1363,22 @@ impl App {
         frame.render_widget(log_block, left_chunks[2]);
 
         let visible_lines = log_inner.height as usize;
-        let start = if self.log_lines.len() > visible_lines {
-            self.log_lines.len() - visible_lines
+        
+        if self.log_auto_scroll {
+            self.log_scroll = self.log_lines.len().saturating_sub(visible_lines);
         } else {
-            0
-        };
+            // Clamp scroll to valid bounds just in case, and re-enable auto-scroll if at bottom
+            let max_scroll = self.log_lines.len().saturating_sub(visible_lines);
+            if self.log_scroll >= max_scroll {
+                self.log_scroll = max_scroll;
+                self.log_auto_scroll = true;
+            }
+        }
+        
+        let start = self.log_scroll;
+        let end = (start + visible_lines).min(self.log_lines.len());
 
-        let log_items: Vec<ListItem> = self.log_lines[start..]
+        let log_items: Vec<ListItem> = self.log_lines[start..end]
             .iter()
             .map(|(text, level)| {
                 let style = match level {
