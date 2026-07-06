@@ -1226,7 +1226,7 @@ impl App {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(7),   // header + progress
-                Constraint::Length(12),  // metrics
+                Constraint::Length(16),  // metrics
                 Constraint::Min(5),      // log
             ])
             .split(main_chunks[0]);
@@ -1313,9 +1313,9 @@ impl App {
                 Constraint::Length(1), // Refusal text
                 Constraint::Length(1), // KL text
                 Constraint::Length(1), // Spacer
-                Constraint::Length(3), // KL Chart
+                Constraint::Length(5), // KL Chart
                 Constraint::Length(1), // Spacer
-                Constraint::Min(3),    // Ref Chart
+                Constraint::Min(5),    // Ref Chart
             ])
             .split(metrics_inner);
 
@@ -1337,7 +1337,7 @@ impl App {
         frame.render_widget(Paragraph::new(kl_line), metric_lines[1]);
 
         // Draw Line Charts ("hills") instead of solid bars
-        let max_x = self.total_trials as f64;
+        let max_x = (self.current_trial.max(1) as f64).max(self.kl_history.len() as f64);
         let kl_data: Vec<(f64, f64)> = self.kl_history.iter().enumerate().map(|(i, &v)| (i as f64, v)).collect();
         let ref_data: Vec<(f64, f64)> = self.refusal_history.iter().enumerate().map(|(i, &v)| (i as f64, v)).collect();
         
