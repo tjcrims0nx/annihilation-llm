@@ -14,17 +14,20 @@ def main():
         
         # Test if torchvision is available
         import torchvision
+        
+        # Test if annihilate is available
+        import annihilate
     except ImportError as e:
         print(f"Missing dependency detected ({e}). Installing...", flush=True)
         needs_install = True
 
     if needs_reinstall:
-        cmd = ['uv', 'pip', 'install', '--python', sys.executable, 'torch', 'torchvision', 'torchaudio', '--index-url', 'https://download.pytorch.org/whl/cu121', '--reinstall']
+        cmd = ['uv', 'pip', 'install', '--python', sys.executable, 'annihilate-llm', '--index-url', 'https://download.pytorch.org/whl/cu121', '--reinstall']
         print(f"Running: {' '.join(cmd)}", flush=True)
         subprocess.run(cmd, check=True)
-        print("CUDA PyTorch reinstallation complete.", flush=True)
+        print("CUDA PyTorch and dependencies reinstallation complete.", flush=True)
     elif needs_install:
-        cmd = ['uv', 'pip', 'install', '--python', sys.executable, 'torch', 'torchvision', 'torchaudio']
+        cmd = ['uv', 'pip', 'install', '--python', sys.executable, 'annihilate-llm']
         if is_gpu:
             cmd.extend(['--index-url', 'https://download.pytorch.org/whl/cu121'])
         print(f"Running: {' '.join(cmd)}", flush=True)
