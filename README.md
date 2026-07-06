@@ -49,8 +49,11 @@ Ensure you have **Python 3.10+** and **Rust** installed, and that your PyTorch i
 ### Setup & Launch
 > ⚠️ **Note:** Windows support only right now!
 
-Just double-click the `start.bat` script in the root of the repository, or run it from the command line:
+To get started instantly, just copy and paste this into PowerShell:
+
 ```powershell
+git clone https://github.com/tjcrims0nx/annihilation-llm.git
+cd annihilation-llm
 .\start.bat
 ```
 
