@@ -11,9 +11,8 @@ use ratatui::{
     text::{Line, Span},
     widgets::{
         Block, BorderType, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Wrap,
-        Chart, Dataset, GraphType, Axis, Table, Row, Cell, TableState, Sparkline,
+        Table, Row, Cell, TableState, Sparkline,
     },
-    symbols,
 };
 
 use crate::parser::ParsedEvent;
@@ -46,6 +45,7 @@ pub enum Screen {
     TrialActions,
     Chat,
     Export,
+    CheckpointPrompt,
     Confirm(ConfirmAction),
     About,
     RecentModels,
@@ -403,6 +403,7 @@ impl App {
             Screen::TrialActions => self.handle_trial_actions_key(key),
             Screen::Chat => self.handle_chat_key(key),
             Screen::Export => self.handle_export_key(key),
+            Screen::CheckpointPrompt => self.handle_checkpoint_prompt_key(key),
             Screen::Confirm(action) => self.handle_confirm_key(key, action.clone()),
             Screen::About => self.handle_about_key(key),
             Screen::RecentModels => self.handle_recent_models_key(key),
@@ -520,7 +521,7 @@ impl App {
         match key.code {
             KeyCode::Enter => {
                 if !self.model_input.is_empty() {
-                    self.start_processing();
+                    self.check_and_start_processing();
                 }
             }
             KeyCode::Esc => {
@@ -816,7 +817,7 @@ impl App {
                 if selected < self.current_menu.len() - 1 {
                     // It's a model
                     self.model_input = self.current_menu[selected].label.clone();
-                    self.start_processing();
+                    self.check_and_start_processing();
                 } else {
                     // It's the "Back" button
                     self.screen = Screen::Setup;
@@ -886,12 +887,6 @@ impl App {
 
         self.log_lines.push(("Verifying Python Environment and Missing Dependencies...".to_string(), LogLevel::Info));
 
-        // Delete the checkpoints directory to prevent `annihilate` from prompting to continue
-        let checkpoint_dir = crate::subprocess::get_repo_root().join(".annihilate_checkpoints");
-        if checkpoint_dir.exists() {
-            let _ = std::fs::remove_dir_all(&checkpoint_dir);
-        }
-
         // Save to recent models
         if !self.model_input.is_empty() {
             let recent_file = crate::subprocess::get_repo_root().join(".recent_models");
@@ -907,6 +902,64 @@ impl App {
         }
 
         self.subprocess = Some(SubprocessManager::spawn_setup(self.sys_info.gpu_name != "Unknown"));
+    }
+
+    fn check_and_start_processing(&mut self) {
+        let checkpoint_dir = crate::subprocess::get_repo_root().join("checkpoints");
+        
+        // Sanitize model name exactly like python backend does
+        let sanitized_model: String = self.model_input.chars()
+            .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c.to_string() } else { "--".to_string() })
+            .collect();
+            
+        let checkpoint_file = checkpoint_dir.join(format!("{}.jsonl", sanitized_model));
+        
+        if checkpoint_file.exists() {
+            self.screen = Screen::CheckpointPrompt;
+            self.current_menu = vec![
+                MenuItem::new("Resume previous run", "Continue optimization from the saved checkpoint"),
+                MenuItem::new("Start fresh", "Delete previous checkpoint and start over"),
+                MenuItem::new("Cancel", "Go back"),
+            ];
+            self.menu_state.select(Some(0));
+        } else {
+            self.start_processing();
+        }
+    }
+
+    fn handle_checkpoint_prompt_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => self.menu_up(),
+            KeyCode::Down | KeyCode::Char('j') => self.menu_down(),
+            KeyCode::Enter => {
+                match self.menu_state.selected() {
+                    Some(0) => {
+                        // Resume previous run
+                        self.start_processing();
+                    }
+                    Some(1) => {
+                        // Start fresh
+                        let sanitized_model: String = self.model_input.chars()
+                            .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c.to_string() } else { "--".to_string() })
+                            .collect();
+                        let checkpoint_file = crate::subprocess::get_repo_root()
+                            .join("checkpoints")
+                            .join(format!("{}.jsonl", sanitized_model));
+                        
+                        if checkpoint_file.exists() {
+                            let _ = std::fs::remove_file(checkpoint_file);
+                        }
+                        self.start_processing();
+                    }
+                    Some(2) | _ => {
+                        // Cancel - go back to Setup
+                        self.go_back_to_splash();
+                    }
+                }
+            }
+            KeyCode::Esc => self.go_back_to_splash(),
+            _ => {}
+        }
     }
 
     // ─── Rendering ─────────────────────────────────────────────
@@ -933,6 +986,10 @@ impl App {
             Screen::TrialActions => self.render_menu_screen(frame, area, "TRIAL ACTIONS", "What do you want to do with the decensored model?"),
             Screen::Chat => self.render_chat(frame, area),
             Screen::Export => self.render_menu_screen(frame, area, "EXPORT MODEL", "Choose export strategy:"),
+            Screen::CheckpointPrompt => {
+                self.render_menu_screen(frame, area, "MODEL SETUP", "Select how to specify your model:");
+                self.render_checkpoint_prompt_dialog(frame, area);
+            },
             Screen::RecentModels => self.render_menu_screen(frame, area, "RECENT MODELS", "Select a previously used model:"),
             Screen::Confirm(action) => {
                 // Render previous screen dimmed, then overlay
@@ -1705,6 +1762,41 @@ impl App {
                     .border_type(BorderType::Double)
                     .border_style(Style::default().fg(theme::NEON_AMBER))
                     .title(Span::styled(" ⚠ Confirm ", theme::warning_style()))
+                    .title_alignment(Alignment::Center)
+                    .style(Style::default().bg(theme::BG_ELEVATED)),
+            );
+        frame.render_stateful_widget(dialog, dialog_area, &mut self.menu_state);
+    }
+
+    fn render_checkpoint_prompt_dialog(&mut self, frame: &mut Frame, area: Rect) {
+        let dialog_width = 60.min(area.width.saturating_sub(4));
+        let dialog_height = 8;
+        let dialog_area = centered_rect_fixed(dialog_width, dialog_height, area);
+
+        frame.render_widget(Clear, dialog_area);
+
+        let items: Vec<ListItem> = self.current_menu
+            .iter()
+            .enumerate()
+            .map(|(i, item)| {
+                let is_selected = self.menu_state.selected() == Some(i);
+                let prefix = if is_selected { " ▸ " } else { "   " };
+                let style = if is_selected {
+                    Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme::TEXT_PRIMARY)
+                };
+                ListItem::new(Line::from(Span::styled(format!("{}{}", prefix, item.label), style)))
+            })
+            .collect();
+
+        let dialog = List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Double)
+                    .border_style(Style::default().fg(theme::NEON_AMBER))
+                    .title(Span::styled(" ⚠ Checkpoint Found ", theme::warning_style()))
                     .title_alignment(Alignment::Center)
                     .style(Style::default().bg(theme::BG_ELEVATED)),
             );
