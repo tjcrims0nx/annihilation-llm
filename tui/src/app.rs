@@ -214,8 +214,8 @@ impl App {
         self.glow_phase = (self.tick_count as f64 * 0.05).sin() * 0.5 + 0.5;
 
         // Process real subprocess events
-        if self.screen == Screen::Processing && self.is_processing {
-            if let Some(ref mut child) = self.subprocess {
+        if self.screen == Screen::Processing && self.is_processing
+            && let Some(ref mut child) = self.subprocess {
                 use crate::subprocess::SubprocessMessage;
                 let msgs = child.poll_messages();
 
@@ -367,7 +367,6 @@ impl App {
                     self.elapsed_secs += 1; // Roughly 1 second elapsed (at 30fps)
                 }
             }
-        }
     }
 
     fn generate_demo_results(&mut self) {
