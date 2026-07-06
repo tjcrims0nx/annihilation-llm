@@ -45,6 +45,7 @@ pub enum Screen {
     Chat,
     Export,
     Confirm(ConfirmAction),
+    About,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -397,6 +398,7 @@ impl App {
             Screen::Chat => self.handle_chat_key(key),
             Screen::Export => self.handle_export_key(key),
             Screen::Confirm(action) => self.handle_confirm_key(key, action.clone()),
+            Screen::About => self.handle_about_key(key),
         }
 
         self.should_quit
@@ -430,7 +432,9 @@ impl App {
                         ];
                         self.menu_state.select(Some(0));
                     }
-                    Some(2) => { /* About - could show a popup */ }
+                    Some(2) => {
+                        self.screen = Screen::About;
+                    }
                     Some(3) => self.should_quit = true, // Quit
                     _ => {}
                 }
@@ -741,6 +745,18 @@ impl App {
         }
     }
 
+    // ─── About Screen Keys ─────────────────────────────────────
+
+    fn handle_about_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                self.screen = Screen::Splash;
+                self.menu_state.select(Some(2)); // Reselect "About" in the menu
+            }
+            _ => {}
+        }
+    }
+
     // ─── Menu Helpers ──────────────────────────────────────────
 
     fn menu_up(&mut self) {
@@ -827,6 +843,7 @@ impl App {
                 }
                 self.render_confirm_dialog(frame, area);
             }
+            Screen::About => self.render_about(frame, area),
         }
 
         // Status bar at bottom
@@ -1597,6 +1614,64 @@ impl App {
                     .style(Style::default().bg(theme::BG_ELEVATED)),
             );
         frame.render_stateful_widget(dialog, dialog_area, &mut self.menu_state);
+    }
+
+    // ─── About Screen ──────────────────────────────────────────
+
+    fn render_about(&mut self, frame: &mut Frame, area: Rect) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme::NEON_CYAN))
+            .style(Style::default().bg(theme::BG_DARK));
+        let inner_area = block.inner(area);
+        frame.render_widget(block, area);
+
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(8),  // Logo
+                Constraint::Length(2),  // Spacer
+                Constraint::Length(10), // Info
+                Constraint::Min(1),     // Bottom Spacer
+                Constraint::Length(3),  // Footer
+            ])
+            .margin(2)
+            .split(inner_area);
+
+        // Logo
+        let logo_lines: Vec<Line> = BANNER.iter().map(|&s| {
+            Line::from(Span::styled(s, Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)))
+        }).collect();
+        let logo = Paragraph::new(logo_lines).alignment(Alignment::Center);
+        frame.render_widget(logo, layout[0]);
+
+        // Info
+        let info_text = vec![
+            Line::from(Span::styled("ANNIHILATE v1.4.3", theme::title_style())),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Author: ", Style::default().fg(theme::TEXT_DIM)),
+                Span::styled("tjcrims0nx", Style::default().fg(theme::NEON_MAGENTA).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(vec![
+                Span::styled("GitHub: ", Style::default().fg(theme::TEXT_DIM)),
+                Span::styled("https://github.com/tjcrims0nx/annihilation-llm", Style::default().fg(theme::NEON_CYAN)),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled("An advanced orthogonal representation ablation framework designed to", Style::default().fg(theme::TEXT_PRIMARY))),
+            Line::from(Span::styled("systematically identify and zero-out structural refusal vectors in LLMs.", Style::default().fg(theme::TEXT_PRIMARY))),
+            Line::from(""),
+            Line::from(Span::styled("Unchain your local models.", Style::default().fg(theme::NEON_AMBER).add_modifier(Modifier::ITALIC))),
+        ];
+        
+        let info_para = Paragraph::new(info_text).alignment(Alignment::Center);
+        frame.render_widget(info_para, layout[2]);
+
+        // Footer
+        let footer = Paragraph::new(Line::from(Span::styled("Press Esc or Enter to return", theme::dim_style())))
+            .alignment(Alignment::Center);
+        frame.render_widget(footer, layout[4]);
     }
 
     // ─── Status Bar ────────────────────────────────────────────
