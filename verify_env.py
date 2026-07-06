@@ -36,7 +36,7 @@ def main():
             "pip",
             "install",
             ".",
-            "--index-url",
+            "--extra-index-url",
             "https://download.pytorch.org/whl/cu121",
             "--reinstall",
         ]
@@ -46,7 +46,7 @@ def main():
     elif needs_install:
         cmd = [sys.executable, "-m", "pip", "install", "."]
         if is_gpu:
-            cmd.extend(["--index-url", "https://download.pytorch.org/whl/cu121"])
+            cmd.extend(["--extra-index-url", "https://download.pytorch.org/whl/cu121"])
         print(f"Running: {' '.join(cmd)}", flush=True)
         subprocess.run(cmd, check=True)
         print("Dependencies installation complete.", flush=True)
