@@ -284,6 +284,10 @@ impl SubprocessManager {
                     .args(["/F", "/T", "/PID", &pid.to_string()])
                     .output();
             } else {
+                // Kill child processes (like python running under sh, or multiprocessing workers)
+                let _ = Command::new("pkill")
+                    .args(["-9", "-P", &pid.to_string()])
+                    .output();
                 let _ = child.kill();
             }
         }
