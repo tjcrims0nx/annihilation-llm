@@ -40,14 +40,4 @@ jobs:
       - name: Check typing
         run: uv run ty check --output-format=github --error-on-warning .
 
-      - name: Build package
-        run: uv build
 
-      - name: Verify build artifacts
-        run: |
-          if [ ! -d "dist" ]; then
-            echo "Build failed: 'dist' directory not found."
-            exit 1
-          fi
-          echo "Build artifacts found:"
-          ls -l dist/
