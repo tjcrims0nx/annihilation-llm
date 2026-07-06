@@ -66,12 +66,7 @@ Repository = "https://github.com/tjcrims0nx/annihilation-llm.git"
 Issues = "https://github.com/tjcrims0nx/annihilation-llm/issues"
 Changelog = "https://github.com/tjcrims0nx/annihilation-llm/releases"
 
-[project.scripts]
-annihilate = "annihilate.main:main"
-annihilation = "annihilate.main:main"
-annihilate-doctor = "annihilate.repair:doctor_main"
-annihilate-repair = "annihilate.repair:repair_main"
-annihilate-uninstall = "annihilate.repair:uninstall_main"
+
 
 [build-system]
 requires = ["uv_build>=0.8.11,<0.9.0"]
