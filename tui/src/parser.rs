@@ -113,10 +113,11 @@ pub fn parse_line(raw: &str) -> ParsedEvent {
         let mut total_trials = 0;
         
         for (i, part) in parts.iter().enumerate() {
-            if part.contains("trial") && i + 1 < parts.len()
-                && let Ok(n) = parts[i + 1].replace(',', "").parse() {
+            if part.contains("trial") && i + 1 < parts.len() {
+                if let Ok(n) = parts[i + 1].replace(',', "").parse() {
                     trial_num = n;
                 }
+            }
             if part.contains("of") && i + 1 < parts.len() {
                 let stripped: String = parts[i + 1].chars().filter(|c| c.is_ascii_digit()).collect();
                 if let Ok(n) = stripped.parse() {
@@ -149,10 +150,11 @@ pub fn parse_line(raw: &str) -> ParsedEvent {
     }
 
     // KL divergence standalone
-    if (line.contains("KL divergence") || line.contains("kl_divergence"))
-        && let Some(kl) = extract_float_after(&line, "KL") {
+    if line.contains("KL divergence") || line.contains("kl_divergence") {
+        if let Some(kl) = extract_float_after(&line, "KL") {
             return ParsedEvent::KLDivergence(kl);
         }
+    }
 
     // GPU memory
     if line.contains("GPU") && line.contains("GB") && line.contains("allocated") {

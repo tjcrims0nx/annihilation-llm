@@ -47,7 +47,7 @@ Once running, monitor everything in real-time. The dashboard features dynamic sp
 Ensure you have **Python 3.10+** and **Rust** installed, and that your PyTorch installation supports CUDA (if you are using an NVIDIA GPU).
 
 ### Setup & Launch
-> ⚠️ **Note:** Windows support only right now!
+> ✅ **Note:** Windows and Ubuntu (Linux/WSL) are fully supported!
 
 To get started instantly, just copy and paste this into PowerShell:
 
@@ -55,6 +55,14 @@ To get started instantly, just copy and paste this into PowerShell:
 git clone https://github.com/tjcrims0nx/annihilation-llm.git
 cd annihilation-llm
 .\start.bat
+```
+
+For **Ubuntu / Linux**:
+```bash
+git clone https://github.com/tjcrims0nx/annihilation-llm.git
+cd annihilation-llm
+chmod +x start.sh
+./start.sh
 ```
 
 > 💡 **Note:** The very first time you run this, it will take a minute to compile the Rust TUI and set up the Python virtual environment. Subsequent launches will be near-instant! You do **not** need to manually build the project; the `start.bat` script handles all compilation and environment setup on the fly.

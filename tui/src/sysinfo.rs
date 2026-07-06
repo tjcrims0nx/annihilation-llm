@@ -72,8 +72,8 @@ impl SystemInfo {
             ])
             .output();
 
-        if let Ok(output) = output
-            && output.status.success() {
+        if let Ok(output) = output {
+            if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let parts: Vec<&str> = stdout.trim().split(',').collect();
                 if parts.len() >= 2 {
@@ -81,6 +81,7 @@ impl SystemInfo {
                     self.ram_used_mb = parts[1].parse().unwrap_or(0.0);
                 }
             }
+        }
     }
 
     /// Quick GPU refresh using nvidia-smi (just VRAM usage, faster).
@@ -92,11 +93,12 @@ impl SystemInfo {
             ])
             .output();
 
-        if let Ok(output) = output
-            && output.status.success() {
+        if let Ok(output) = output {
+            if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 self.vram_used_mb = stdout.trim().parse().unwrap_or(self.vram_used_mb);
             }
+        }
     }
 
     /// Get VRAM in GB for display.
