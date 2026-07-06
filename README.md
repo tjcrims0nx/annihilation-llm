@@ -57,6 +57,8 @@ cd annihilation-llm
 .\start.bat
 ```
 
+> 💡 **Note:** The very first time you run this, it will take a minute to compile the Rust TUI and set up the Python virtual environment. Subsequent launches will be near-instant!
+
 ---
 
 ## 📜 License & Disclaimer
