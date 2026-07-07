@@ -743,13 +743,17 @@ impl App {
         false
     }
     pub fn handle_paste(&mut self, text: String) {
+        let clean = text.replace('\n', "").replace('\r', "");
         if self.screen == Screen::ModelInput {
-            // Strip out newlines so we don't accidentally execute or break the input field
-            let clean = text.replace('\n', "").replace('\r', "");
             self.model_error = None;
             for c in clean.chars() {
                 self.model_input.insert(self.model_cursor, c);
                 self.model_cursor += 1;
+            }
+        } else if self.screen == Screen::TokenInput {
+            for c in clean.chars() {
+                self.hf_token_input.insert(self.hf_token_cursor, c);
+                self.hf_token_cursor += 1;
             }
         }
     }
