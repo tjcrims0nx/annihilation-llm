@@ -38,6 +38,7 @@ pub enum Screen {
     Splash,
     Setup,
     ModelInput,
+    TokenInput,
     ConfigSelect,
     Processing,
     Results,
@@ -112,6 +113,10 @@ pub struct App {
     pub model_cursor: usize,
     pub model_error: Option<String>,
 
+    // Token input
+    pub hf_token_input: String,
+    pub hf_token_cursor: usize,
+
     // Processing state
     pub is_processing: bool,
     pub is_setting_up: bool,
@@ -180,6 +185,8 @@ impl App {
             model_input: String::new(),
             model_cursor: 0,
             model_error: None,
+            hf_token_input: std::env::var("HF_TOKEN").unwrap_or_default(),
+            hf_token_cursor: std::env::var("HF_TOKEN").unwrap_or_default().len(),
             is_processing: false,
             is_setting_up: false,
             subprocess: None,
@@ -486,6 +493,7 @@ impl App {
             Screen::Splash => self.handle_splash_key(key),
             Screen::Setup => self.handle_setup_key(key),
             Screen::ModelInput => self.handle_model_input_key(key),
+            Screen::TokenInput => self.handle_token_input_key(key),
             Screen::ConfigSelect => self.handle_config_select_key(key),
             Screen::Processing => self.handle_processing_key(key),
             Screen::Results => self.handle_results_key(key),
@@ -560,6 +568,7 @@ impl App {
                             MenuItem::new("Quick Test (50 trials)", "Faster run for testing"),
                             MenuItem::new("Aggressive (400 trials)", "More thorough optimization"),
                             MenuItem::new("4-bit Quantized", "Lower VRAM usage with bnb_4bit"),
+                            MenuItem::new("Set HF Token", "Required for private models or uploading to Hub").with_key("T"),
                             MenuItem::new("Back", "Return to main menu").with_key("Esc"),
                         ];
                         self.menu_state.select(Some(0));
@@ -769,6 +778,11 @@ impl App {
                         self.total_trials = 200;
                         self.quantize = true;
                     }
+                    Some(4) => {
+                        self.screen = Screen::TokenInput;
+                        self.hf_token_cursor = self.hf_token_input.len();
+                        return; // Don't go back to splash
+                    }
                     _ => {}
                 }
                 self.go_back_to_splash();
@@ -779,6 +793,104 @@ impl App {
                 };
             }
             KeyCode::Esc => self.go_back_to_splash(),
+            _ => {}
+        }
+    }
+
+    // ─── Token Input Screen Keys ───────────────────────────────
+
+    fn handle_token_input_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char('v') | KeyCode::Char('V') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Ok(text) = clipboard.get_text() {
+                        let clean = text.replace('\n', "").replace('\r', "");
+                        for c in clean.chars() {
+                            self.hf_token_input.insert(self.hf_token_cursor, c);
+                            self.hf_token_cursor += 1;
+                        }
+                    }
+                }
+            }
+            KeyCode::Insert if key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) => {
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Ok(text) = clipboard.get_text() {
+                        let clean = text.replace('\n', "").replace('\r', "");
+                        for c in clean.chars() {
+                            self.hf_token_input.insert(self.hf_token_cursor, c);
+                            self.hf_token_cursor += 1;
+                        }
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                let token = self.hf_token_input.trim().to_string();
+                if !token.is_empty() {
+                    unsafe {
+                        std::env::set_var("HF_TOKEN", &token);
+                    }
+                    let _ = std::fs::write(".env", format!("HF_TOKEN={}", token));
+                    self.status_message = "HuggingFace token saved successfully.".to_string();
+                } else {
+                    unsafe {
+                        std::env::remove_var("HF_TOKEN");
+                    }
+                    let _ = std::fs::write(".env", "");
+                    self.status_message = "HuggingFace token cleared.".to_string();
+                }
+                
+                // Go back to config select
+                self.screen = Screen::ConfigSelect;
+                self.current_menu = vec![
+                    MenuItem::new(
+                        "Default (200 trials)",
+                        "Standard configuration, no quantization",
+                    ),
+                    MenuItem::new("Quick Test (50 trials)", "Faster run for testing"),
+                    MenuItem::new("Aggressive (400 trials)", "More thorough optimization"),
+                    MenuItem::new("4-bit Quantized", "Lower VRAM usage with bnb_4bit"),
+                    MenuItem::new("Set HF Token", "Required for private models or uploading to Hub").with_key("T"),
+                    MenuItem::new("Back", "Return to main menu").with_key("Esc"),
+                ];
+                self.menu_state.select(Some(4));
+            }
+            KeyCode::Esc => {
+                self.screen = Screen::ConfigSelect;
+                self.current_menu = vec![
+                    MenuItem::new(
+                        "Default (200 trials)",
+                        "Standard configuration, no quantization",
+                    ),
+                    MenuItem::new("Quick Test (50 trials)", "Faster run for testing"),
+                    MenuItem::new("Aggressive (400 trials)", "More thorough optimization"),
+                    MenuItem::new("4-bit Quantized", "Lower VRAM usage with bnb_4bit"),
+                    MenuItem::new("Set HF Token", "Required for private models or uploading to Hub").with_key("T"),
+                    MenuItem::new("Back", "Return to main menu").with_key("Esc"),
+                ];
+                self.menu_state.select(Some(4));
+            }
+            KeyCode::Char(c) => {
+                self.hf_token_input.insert(self.hf_token_cursor, c);
+                self.hf_token_cursor += 1;
+            }
+            KeyCode::Backspace => {
+                if self.hf_token_cursor > 0 {
+                    self.hf_token_cursor -= 1;
+                    self.hf_token_input.remove(self.hf_token_cursor);
+                }
+            }
+            KeyCode::Left => {
+                if self.hf_token_cursor > 0 {
+                    self.hf_token_cursor -= 1;
+                }
+            }
+            KeyCode::Right => {
+                if self.hf_token_cursor < self.hf_token_input.len() {
+                    self.hf_token_cursor += 1;
+                }
+            }
+            KeyCode::Home => self.hf_token_cursor = 0,
+            KeyCode::End => self.hf_token_cursor = self.hf_token_input.len(),
             _ => {}
         }
     }
@@ -1223,6 +1335,7 @@ impl App {
                 "Select how to specify your model:",
             ),
             Screen::ModelInput => self.render_model_input(frame, area),
+            Screen::TokenInput => self.render_token_input(frame, area),
             Screen::ConfigSelect => self.render_menu_screen(
                 frame,
                 area,
@@ -1593,6 +1706,120 @@ impl App {
             .alignment(Alignment::Center);
             frame.render_widget(hints, hint_area);
         }
+    }
+
+    // ─── Token Input Rendering ─────────────────────────────────
+
+    fn render_token_input(&self, frame: &mut Frame, area: Rect) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(3),
+                Constraint::Length(1),
+                Constraint::Length(5),
+                Constraint::Min(0),
+                Constraint::Length(1),
+            ])
+            .split(area);
+
+        // Title
+        let title = Paragraph::new(Line::from(vec![
+            Span::styled("  ? ", Style::default().fg(theme::NEON_AMBER)),
+            Span::styled("HUGGINGFACE TOKEN", theme::title_style()),
+            Span::styled(" ?  ", Style::default().fg(theme::NEON_AMBER)),
+        ]))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
+        );
+        frame.render_widget(title, chunks[0]);
+
+        // Input Box
+        let inner_input_area = centered_rect_fixed(60, 3, chunks[1]);
+        
+        let display_text = if self.hf_token_input.is_empty() {
+            "e.g. hf_AbcDefGhiJklMnoPqrStuVwxYz...".to_string()
+        } else {
+            // Mask all but first 3 chars
+            if self.hf_token_input.len() > 3 {
+                let visible = &self.hf_token_input[0..3];
+                let hidden = "*".repeat(self.hf_token_input.len() - 3);
+                format!("{}{}", visible, hidden)
+            } else {
+                "*".repeat(self.hf_token_input.len())
+            }
+        };
+
+        let input_style = if self.hf_token_input.is_empty() {
+            Style::default().fg(theme::TEXT_DIM)
+        } else {
+            Style::default()
+                .fg(theme::NEON_AMBER)
+                .add_modifier(Modifier::BOLD)
+        };
+
+        let input_block = Paragraph::new(display_text)
+            .style(input_style)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Double)
+                    .border_style(Style::default().fg(theme::NEON_AMBER))
+                    .title(Span::styled(" Access Token ", theme::warning_style())),
+            );
+
+        frame.render_widget(input_block, inner_input_area);
+
+        // Error message or info
+        let info_text = vec![
+            Line::from(Span::styled(
+                "A HuggingFace User Access Token is required to:",
+                Style::default().fg(theme::TEXT_PRIMARY),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("1. ", Style::default().fg(theme::NEON_CYAN)),
+                Span::styled("Download private/gated models (Read permissions).", theme::dim_style()),
+            ]),
+            Line::from(vec![
+                Span::styled("2. ", Style::default().fg(theme::NEON_CYAN)),
+                Span::styled("Upload your decensored model to the Hub (Write permissions).", theme::dim_style()),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Get your token at: ", Style::default().fg(theme::TEXT_DIM)),
+                Span::styled("https://huggingface.co/settings/tokens", Style::default().fg(theme::NEON_BLUE).add_modifier(Modifier::UNDERLINED)),
+            ]),
+        ];
+        
+        let info_para = Paragraph::new(info_text)
+            .alignment(Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
+            );
+        let info_area = centered_rect_fixed(70, 8, chunks[3]);
+        frame.render_widget(info_para, info_area);
+
+        // Hints
+        let hints = Paragraph::new(Line::from(vec![
+            Span::styled("Enter ", theme::key_hint_style()),
+            Span::styled("Save token   ", theme::key_desc_style()),
+            Span::styled("Ctrl+V ", theme::key_hint_style()),
+            Span::styled("Paste   ", theme::key_desc_style()),
+            Span::styled("Esc ", theme::key_hint_style()),
+            Span::styled("Clear/Cancel", theme::key_desc_style()),
+        ]))
+        .alignment(Alignment::Center);
+        frame.render_widget(hints, chunks[5]);
+
+        let cursor_x = inner_input_area.x + 1 + self.hf_token_cursor as u16;
+        let cursor_y = inner_input_area.y + 1;
+        frame.set_cursor_position((cursor_x, cursor_y));
     }
 
     // ─── Processing Dashboard ──────────────────────────────────
