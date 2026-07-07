@@ -39,6 +39,12 @@ import logging
 import math
 import os
 import random
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 import time
 import warnings
 from dataclasses import asdict
