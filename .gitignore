@@ -37,3 +37,10 @@ test_out.txt
 
 # Codex attachments
 /.codex-remote-attachments/
+
+# Agent artifacts
+.agents/
+
+# TUI state files
+.recent_models
+tui/.recent_models
