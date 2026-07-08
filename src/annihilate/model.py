@@ -148,7 +148,10 @@ class Model:
                     device_map=settings.device_map,
                     max_memory=self.max_memory,
                     trust_remote_code=True
-                    if (settings.trust_remote_code or settings.model in self.trusted_models)
+                    if (
+                        settings.trust_remote_code
+                        or settings.model in self.trusted_models
+                    )
                     else None,
                     **self.revision_kwargs,
                     **extra_kwargs,
@@ -310,7 +313,10 @@ class Model:
                 torch_dtype=self.model.dtype,
                 device_map="cpu",
                 trust_remote_code=True
-                if (self.settings.trust_remote_code or self.settings.model in self.trusted_models)
+                if (
+                    self.settings.trust_remote_code
+                    or self.settings.model in self.trusted_models
+                )
                 else None,
                 **self.revision_kwargs,
             )
@@ -379,7 +385,10 @@ class Model:
             device_map=self.settings.device_map,
             max_memory=self.max_memory,
             trust_remote_code=True
-            if (self.settings.trust_remote_code or self.settings.model in self.trusted_models)
+            if (
+                self.settings.trust_remote_code
+                or self.settings.model in self.trusted_models
+            )
             else None,
             **self.revision_kwargs,
             **extra_kwargs,

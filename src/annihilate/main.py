@@ -17,6 +17,7 @@ for stream in (sys.stdout, sys.stderr):
 try:
     import transformers.utils.generic
     from transformers.utils.output_capturing import OutputRecorder
+
     transformers.utils.generic.OutputRecorder = OutputRecorder
 except ImportError:
     pass
@@ -50,6 +51,7 @@ import random
 
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
@@ -153,7 +155,10 @@ def obtain_export_strategy(
                     device_map="meta",
                     torch_dtype=torch.bfloat16,
                     trust_remote_code=True
-                    if (settings.trust_remote_code or settings.model in model.trusted_models)
+                    if (
+                        settings.trust_remote_code
+                        or settings.model in model.trusted_models
+                    )
                     else None,
                     **model.revision_kwargs,
                 )
