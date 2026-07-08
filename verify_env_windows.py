@@ -39,6 +39,7 @@ def main():
                 "uv",
                 "sync",
                 "-v",
+                "--no-progress",
                 "--link-mode=copy",
             ]
         else:

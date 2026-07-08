@@ -27,7 +27,7 @@ def main():
         needs_install = True
 
     if needs_install:
-        cmd = [sys.executable, "-m", "pip", "install", "."]
+        cmd = [sys.executable, "-m", "pip", "install", ".", "--progress-bar", "off"]
         if is_gpu:
             cmd.extend(["--extra-index-url", "https://download.pytorch.org/whl/cu121"])
 
