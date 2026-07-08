@@ -38,6 +38,7 @@ def main():
             cmd = [
                 "uv",
                 "sync",
+                "-v",
                 "--link-mode=copy",
             ]
         else:
