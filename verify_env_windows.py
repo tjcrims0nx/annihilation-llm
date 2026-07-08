@@ -1,7 +1,7 @@
 import importlib.util
+import shutil
 import subprocess
 import sys
-import shutil
 
 
 def main():
