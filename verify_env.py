@@ -13,7 +13,7 @@ def main():
 
         if is_gpu and not torch.cuda.is_available():
             print(
-                "CRITICAL: GPU detected but PyTorch is CPU-only! Forcing CUDA reinstall...",
+                "CRITICAL: GPU detected but PyTorch is CPU-only! Forcing CUDA reinstall... (NOTE: PyTorch extraction can take 15-20 minutes)",
                 flush=True,
             )
             needs_reinstall = True
