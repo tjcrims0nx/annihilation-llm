@@ -35,6 +35,11 @@ def main():
             print(
                 "Detected 'uv' package manager. Using fast installation...", flush=True
             )
+            import os
+            env = os.environ.copy()
+            if "UV_EXCLUDE_NEWER" in env:
+                del env["UV_EXCLUDE_NEWER"]
+            
             cmd = [
                 "uv",
                 "sync",
@@ -51,7 +56,7 @@ def main():
                 cmd.append("--force-reinstall")
 
         print(f"Running: {' '.join(cmd)}", flush=True)
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, env=env if has_uv else None)
         print("Dependencies installation complete.", flush=True)
     else:
         print(
