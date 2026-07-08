@@ -38,7 +38,6 @@ def main():
             cmd = [
                 "uv",
                 "sync",
-                "-v",
                 "--no-progress",
                 "--link-mode=copy",
             ]
