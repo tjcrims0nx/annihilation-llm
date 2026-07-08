@@ -162,7 +162,7 @@ impl SubprocessManager {
         let mut cmd = Command::new(&python);
         cmd.arg("-u"); // Unbuffered output
         cmd.arg("-c");
-        cmd.arg("import sys; from annihilate.main import main; sys.argv = ['annihilate'] + sys.argv[1:]; sys.exit(main())");
+        cmd.arg("import sys, warnings; warnings.filterwarnings('ignore'); from annihilate.main import main; sys.argv = ['annihilate'] + sys.argv[1:]; sys.exit(main())");
         cmd.arg("--model").arg(model);
         for arg in extra_args {
             cmd.arg(arg);
