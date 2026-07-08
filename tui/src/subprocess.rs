@@ -161,8 +161,8 @@ impl SubprocessManager {
         // Build command using the python executable directly to avoid block-buffering from pip .exe wrappers
         let mut cmd = Command::new(&python);
         cmd.arg("-u"); // Unbuffered output
-        cmd.arg("-c");
-        cmd.arg("import sys, warnings; warnings.filterwarnings('ignore'); from annihilate.main import main; sys.argv = ['annihilate'] + sys.argv[1:]; sys.exit(main())");
+        cmd.arg("-m");
+        cmd.arg("annihilate");
         cmd.arg("--model").arg(model);
         for arg in extra_args {
             cmd.arg(arg);
@@ -178,6 +178,8 @@ impl SubprocessManager {
 
         // Set UTF-8 environment and unbuffer Python
         cmd.env("PYTHONIOENCODING", "utf-8");
+        cmd.env("PYTHONUNBUFFERED", "1");
+        cmd.env("PYTHONWARNINGS", "ignore");
         cmd.env("PYTHONUNBUFFERED", "1");
         // Force color so rich prints nice ANSI tags we can strip, and tqdm falls back to newline mode
         cmd.env("FORCE_COLOR", "1");
