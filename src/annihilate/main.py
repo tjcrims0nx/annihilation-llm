@@ -145,7 +145,7 @@ def obtain_export_strategy(
                     device_map="meta",
                     torch_dtype=torch.bfloat16,
                     trust_remote_code=True
-                    if settings.model in model.trusted_models
+                    if (settings.trust_remote_code or settings.model in model.trusted_models)
                     else None,
                     **model.revision_kwargs,
                 )

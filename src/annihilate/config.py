@@ -105,6 +105,11 @@ class Settings(BaseSettings):
         description="Hugging Face commit hash of the model.",
     )
 
+    trust_remote_code: bool = Field(
+        default=False,
+        description="Whether to allow custom remote code when loading models.",
+    )
+
     evaluate_model: str | None = Field(
         default=None,
         description=(
