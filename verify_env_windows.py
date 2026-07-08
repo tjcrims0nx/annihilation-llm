@@ -37,7 +37,7 @@ def main():
         cmd = []
         if has_uv:
             print("Detected 'uv' package manager. Using fast installation...", flush=True)
-            cmd = ["uv", "pip", "install", "--python", sys.executable, "."]
+            cmd = ["uv", "pip", "install", "--link-mode=copy", "--python", sys.executable, "."]
         else:
             cmd = [sys.executable, "-m", "pip", "install", ".", "--no-cache-dir"]
             
