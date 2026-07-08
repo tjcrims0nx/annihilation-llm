@@ -430,8 +430,14 @@ def run():
     print(f"* [bold]{len(bad_prompts)}[/] prompts loaded")
 
     if settings.batch_size == 0:
-        print()
-        print("Determining optimal batch size...")
+        accelerator_info = get_accelerator_info_dict()
+        if accelerator_info.get("gpu_name") == "Unknown":
+            print()
+            print("No accelerator detected. Defaulting to batch size 1 to prevent system RAM thrashing.")
+            settings.batch_size = 1
+        else:
+            print()
+            print("Determining optimal batch size...")
 
         batch_size = 1
         best_batch_size = -1
