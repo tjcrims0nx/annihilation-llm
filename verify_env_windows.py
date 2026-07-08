@@ -33,20 +33,30 @@ def main():
     if needs_reinstall or needs_install:
         # Check if 'uv' is available on Windows
         has_uv = shutil.which("uv") is not None
-        
+
         cmd = []
         if has_uv:
-            print("Detected 'uv' package manager. Using fast installation...", flush=True)
-            cmd = ["uv", "pip", "install", "--link-mode=copy", "--python", sys.executable, "."]
+            print(
+                "Detected 'uv' package manager. Using fast installation...", flush=True
+            )
+            cmd = [
+                "uv",
+                "pip",
+                "install",
+                "--link-mode=copy",
+                "--python",
+                sys.executable,
+                ".",
+            ]
         else:
             cmd = [sys.executable, "-m", "pip", "install", ".", "--no-cache-dir"]
-            
+
         if is_gpu:
             cmd.extend(["--extra-index-url", "https://download.pytorch.org/whl/cu121"])
-            
+
         if needs_reinstall and not has_uv:
             cmd.append("--force-reinstall")
-            
+
         print(f"Running: {' '.join(cmd)}", flush=True)
         subprocess.run(cmd, check=True)
         print("Dependencies installation complete.", flush=True)
