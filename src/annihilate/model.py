@@ -75,6 +75,7 @@ class Model:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.needs_reload = False
+        self.trusted_models = set()
 
         self.revision_kwargs = {}
         if settings.model_commit is not None:
@@ -128,8 +129,6 @@ class Model:
             if settings.max_memory
             else None
         )
-
-        self.trusted_models = set()
 
         for dtype in settings.dtypes:
             print(f"* Trying dtype [bold]{dtype}[/]...")

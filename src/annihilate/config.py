@@ -106,8 +106,8 @@ class Settings(BaseSettings):
     )
 
     trust_remote_code: bool = Field(
-        default=False,
-        description="Whether to allow custom remote code when loading models.",
+        default=True,
+        description="Whether to trust remote code when loading models (required for custom models).",
     )
 
     evaluate_model: str | None = Field(
