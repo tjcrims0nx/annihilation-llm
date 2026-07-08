@@ -18,7 +18,7 @@ try:
     import transformers.utils.generic
     from transformers.utils.output_capturing import OutputRecorder
 
-    transformers.utils.generic.OutputRecorder = OutputRecorder
+    transformers.utils.generic.OutputRecorder = OutputRecorder  # type: ignore
 except ImportError:
     pass
 
