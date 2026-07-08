@@ -725,7 +725,7 @@ impl App {
         let url = format!("https://huggingface.co/api/models/{}", model);
         
         let output = std::process::Command::new("curl")
-            .args(["-s", "-o", dev_null, "-w", "%{http_code}", &url])
+            .args(["-m", "5", "-s", "-o", dev_null, "-w", "%{http_code}", &url])
             .output();
 
         if let Ok(out) = output {

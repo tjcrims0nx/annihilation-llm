@@ -13,6 +13,14 @@ for stream in (sys.stdout, sys.stderr):
     ):
         stream.reconfigure(encoding="utf-8")  # type: ignore
 
+# Patch transformers.utils.generic.OutputRecorder for custom models that still use the old path
+try:
+    import transformers.utils.generic
+    from transformers.utils.output_capturing import OutputRecorder
+    transformers.utils.generic.OutputRecorder = OutputRecorder
+except ImportError:
+    pass
+
 from .config import Settings
 
 
