@@ -46,8 +46,6 @@ def main():
                 "--no-progress",
                 "--link-mode=copy",
             ]
-            if is_gpu:
-                cmd.extend(["--index-url", "https://download.pytorch.org/whl/cu121"])
         else:
             cmd = [sys.executable, "-m", "pip", "install", ".", "--no-cache-dir"]
             if is_gpu:
