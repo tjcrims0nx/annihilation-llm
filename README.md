@@ -44,6 +44,28 @@ Once running, monitor everything in real-time. The dashboard features dynamic sp
 
 ---
 
+## ⚠️ Direct CLI Usage (Fallback)
+
+> ⚠️ **NOTICE:** The Rust TUI is currently undergoing a major rewrite to fix freezing bugs on Windows and Linux and is **temporarily broken**. Please use the direct Python CLI in the meantime!
+
+If you want to bypass the TUI entirely and use the core Python CLI, you can run it directly from the virtual environment:
+
+For **Windows** (PowerShell):
+```powershell
+.\.venv\Scripts\python.exe -m annihilate --help
+# Example:
+.\.venv\Scripts\python.exe -m annihilate --model openbmb/MiniCPM5-1B --n-trials 200
+```
+
+For **Linux / WSL** (Bash):
+```bash
+./.venv/bin/python -m annihilate --help
+# Example:
+./.venv/bin/python -m annihilate --model openbmb/MiniCPM5-1B --n-trials 200
+```
+
+---
+
 ## 🚀 Quick Start
 
 Ensure you have **Python 3.10+** and **Rust** installed, and that your PyTorch installation supports CUDA (if you are using an NVIDIA GPU).
