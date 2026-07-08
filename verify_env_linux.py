@@ -10,10 +10,6 @@ def main():
     try:
         import torch
 
-        # Test if torchvision is available
-        if importlib.util.find_spec("torchvision") is None:
-            raise ImportError("torchvision not found")
-
         # Test if annihilate is available
         if importlib.util.find_spec("annihilate") is None:
             raise ImportError("annihilate not found")

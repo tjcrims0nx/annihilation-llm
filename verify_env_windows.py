@@ -19,10 +19,6 @@ def main():
             )
             needs_reinstall = True
 
-        # Test if torchvision is available
-        if importlib.util.find_spec("torchvision") is None:
-            raise ImportError("torchvision not found")
-
         # Test if annihilate is available
         if importlib.util.find_spec("annihilate") is None:
             raise ImportError("annihilate not found")
@@ -41,21 +37,15 @@ def main():
             )
             cmd = [
                 "uv",
-                "pip",
-                "install",
+                "sync",
                 "--link-mode=copy",
-                "--python",
-                sys.executable,
-                ".",
             ]
         else:
             cmd = [sys.executable, "-m", "pip", "install", ".", "--no-cache-dir"]
-
-        if is_gpu:
-            cmd.extend(["--extra-index-url", "https://download.pytorch.org/whl/cu121"])
-
-        if needs_reinstall and not has_uv:
-            cmd.append("--force-reinstall")
+            if is_gpu:
+                cmd.extend(["--extra-index-url", "https://download.pytorch.org/whl/cu121"])
+            if needs_reinstall:
+                cmd.append("--force-reinstall")
 
         print(f"Running: {' '.join(cmd)}", flush=True)
         subprocess.run(cmd, check=True)
