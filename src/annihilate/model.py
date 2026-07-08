@@ -94,6 +94,9 @@ class Model:
 
         self.tokenizer = AutoTokenizer.from_pretrained(
             settings.model,
+            trust_remote_code=True
+            if (settings.trust_remote_code or settings.model in self.trusted_models)
+            else None,
             **self.revision_kwargs,
         )
 
