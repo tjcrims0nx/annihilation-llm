@@ -54,7 +54,7 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import torch
 
 try:
-    import pyarrow
+    import pyarrow  # noqa: F401
 except ImportError:
     pass
 import random
@@ -78,7 +78,6 @@ import lm_eval
 import numpy as np
 import optuna
 import questionary
-import torch
 import torch.nn.functional as F
 import transformers
 from huggingface_hub import HfApi, ModelCard, ModelCardData
