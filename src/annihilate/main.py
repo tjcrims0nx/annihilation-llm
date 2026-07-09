@@ -47,6 +47,15 @@ patch_tqdm()
 import logging
 import math
 import os
+
+# Fix PyTorch/PyArrow/OpenMP Access Violation (0xC0000005) on Windows by
+# importing these C-extensions first to avoid DLL/mimalloc conflicts with optuna/lm_eval.
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+import torch
+try:
+    import pyarrow
+except ImportError:
+    pass
 import random
 
 try:

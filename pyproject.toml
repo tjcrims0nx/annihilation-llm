@@ -36,6 +36,7 @@ dependencies = [
     "psutil~=7.2",
     "py-cpuinfo~=9.0",
     "pydantic-settings~=2.13",
+    "python-dotenv~=1.0",
     "questionary~=2.1",
     "rich>=14.3,<16.0",
     "sentencepiece~=0.2",
@@ -74,8 +75,6 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-exclude-newer = "7 days"
-index-strategy = "unsafe-best-match"
 
 [[tool.uv.index]]
 name = "pytorch-cu121"
@@ -83,7 +82,12 @@ url = "https://download.pytorch.org/whl/cu121"
 explicit = true
 
 [tool.uv.sources]
-torch = { index = "pytorch-cu121" }
+torch = [
+  { index = "pytorch-cu121", marker = "sys_platform == 'win32'" }
+]
+torchvision = [
+  { index = "pytorch-cu121", marker = "sys_platform == 'win32'" }
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/annihilate"]
