@@ -287,13 +287,13 @@ impl App {
                             self.kl_history.push(kl_divergence);
                             self.refusal_history.push(refusals as f64);
 
-                            if self.best_kl.is_none() || kl_divergence < self.best_kl.unwrap() {
-                                self.best_kl = Some(kl_divergence);
-                            }
-                            if self.best_refusals.is_none()
-                                || refusals < self.best_refusals.unwrap()
-                            {
+                            if self.best_refusals.is_none() || refusals < self.best_refusals.unwrap() {
                                 self.best_refusals = Some(refusals);
+                                self.best_kl = Some(kl_divergence);
+                            } else if refusals == self.best_refusals.unwrap() {
+                                if self.best_kl.is_none() || kl_divergence < self.best_kl.unwrap() {
+                                    self.best_kl = Some(kl_divergence);
+                                }
                             }
 
                             self.log_lines.push((
