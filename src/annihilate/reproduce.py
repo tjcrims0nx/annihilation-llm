@@ -79,7 +79,7 @@ def collect_reproducibles(path: str):
 
             found += 1
 
-            commit_hash = paths_info[0].last_commit.oid
+            commit_hash = paths_info[0].last_commit.oid  # ty: ignore[unresolved-attribute]
 
             file_path = (
                 Path(path)

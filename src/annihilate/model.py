@@ -28,7 +28,7 @@ from transformers import (
     TextStreamer,
 )
 from transformers.generation import (
-    GenerateDecoderOnlyOutput,  # ty:ignore[possibly-missing-import]
+    GenerateDecoderOnlyOutput,
 )
 
 from .config import QuantizationMethod, RowNormalization, Settings
@@ -93,7 +93,7 @@ class Model:
                 "the PEFT/LoRA workflow."
             )
 
-        self.tokenizer = AutoTokenizer.from_pretrained(
+        self.tokenizer = AutoTokenizer.from_pretrained(  # ty: ignore[invalid-assignment]
             settings.model,
             trust_remote_code=True
             if (settings.trust_remote_code or settings.model in self.trusted_models)
@@ -123,7 +123,7 @@ class Model:
         #           after the prompt and thinks the sequence is complete.
         self.tokenizer.padding_side = "left"
 
-        self.model = None  # ty:ignore[invalid-assignment]
+        self.model = None
         self.max_memory = (
             {int(k) if k.isdigit() else k: v for k, v in settings.max_memory.items()}
             if settings.max_memory
@@ -177,7 +177,7 @@ class Model:
                     max_new_tokens=1,
                 )
             except Exception as error:
-                self.model = None  # ty:ignore[invalid-assignment]
+                self.model = None
                 empty_cache()
 
                 formatted = format_exception(error)
@@ -367,7 +367,7 @@ class Model:
             return
 
         # Purge existing model object from memory to make space.
-        self.model = None  # ty:ignore[invalid-assignment]
+        self.model = None
         empty_cache()
 
         quantization_config = self._get_quantization_config(
@@ -429,52 +429,54 @@ class Model:
                     f"Unexpected Tensor in {component} - expected nn.Module"
                 )
 
+        any_layer: Any = layer
+
         # Standard self-attention out-projection (most models).
         with suppress(Exception):
-            try_add("attn.o_proj", layer.self_attn.o_proj)  # ty:ignore[possibly-missing-attribute]
+            try_add("attn.o_proj", any_layer.self_attn.o_proj)
 
         # Qwen3.5 MoE hybrid layers use GatedDeltaNet (linear attention) instead of
         # standard self-attention, so self_attn.o_proj doesn't exist on those layers.
         with suppress(Exception):
-            try_add("attn.o_proj", layer.linear_attn.out_proj)  # ty:ignore[possibly-missing-attribute]
+            try_add("attn.o_proj", any_layer.linear_attn.out_proj)
 
         # Most dense models.
         with suppress(Exception):
-            try_add("mlp.down_proj", layer.mlp.down_proj)  # ty:ignore[possibly-missing-attribute]
+            try_add("mlp.down_proj", any_layer.mlp.down_proj)
 
         # Some MoE models (e.g. Qwen3).
         with suppress(Exception):
-            for expert in layer.mlp.experts:  # ty:ignore[possibly-missing-attribute, not-iterable]
-                try_add("mlp.down_proj", expert.down_proj)  # ty:ignore[possibly-missing-attribute]
+            for expert in any_layer.mlp.experts:
+                try_add("mlp.down_proj", expert.down_proj)
 
         # Phi-3.5-MoE (and possibly others).
         with suppress(Exception):
-            for expert in layer.block_sparse_moe.experts:  # ty:ignore[possibly-missing-attribute, not-iterable]
-                try_add("mlp.down_proj", expert.w2)  # ty:ignore[possibly-missing-attribute]
+            for expert in any_layer.block_sparse_moe.experts:
+                try_add("mlp.down_proj", expert.w2)
 
         # LFM dense operator blocks.
         with suppress(Exception):
-            try_add("attn.o_proj", layer.conv.out_proj)  # ty:ignore[possibly-missing-attribute]
+            try_add("attn.o_proj", any_layer.conv.out_proj)
 
         with suppress(Exception):
-            try_add("mlp.down_proj", layer.feed_forward.w2)  # ty:ignore[possibly-missing-attribute]
+            try_add("mlp.down_proj", any_layer.feed_forward.w2)
 
         # LFM transformer blocks.
         with suppress(Exception):
-            try_add("attn.o_proj", layer.self_attn.out_proj)  # ty:ignore[possibly-missing-attribute]
+            try_add("attn.o_proj", any_layer.self_attn.out_proj)
 
         with suppress(Exception):
-            for expert in layer.feed_forward.experts:  # ty:ignore[possibly-missing-attribute, not-iterable]
-                try_add("mlp.down_proj", expert.w2)  # ty:ignore[possibly-missing-attribute]
+            for expert in any_layer.feed_forward.experts:
+                try_add("mlp.down_proj", expert.w2)
 
         # Granite MoE Hybrid - attention layers with shared_mlp.
         with suppress(Exception):
-            try_add("mlp.down_proj", layer.shared_mlp.output_linear)  # ty:ignore[possibly-missing-attribute]
+            try_add("mlp.down_proj", any_layer.shared_mlp.output_linear)
 
         # Granite MoE Hybrid - MoE layers with experts.
         with suppress(Exception):
-            for expert in layer.moe.experts:  # ty:ignore[possibly-missing-attribute, not-iterable]
-                try_add("mlp.down_proj", expert.output_linear)  # ty:ignore[possibly-missing-attribute]
+            for expert in any_layer.moe.experts:
+                try_add("mlp.down_proj", expert.output_linear)
 
         # We need at least one module across all components for abliteration to work.
         total_modules = sum(len(mods) for mods in modules.values())
@@ -520,7 +522,7 @@ class Model:
                 params = parameters[component]
 
                 # Type inference fails here for some reason.
-                distance = cast(float, abs(layer_index - params.max_weight_position))
+                distance = abs(layer_index - params.max_weight_position)
 
                 # Don't orthogonalize layers that are more than
                 # min_weight_distance away from max_weight_position.
@@ -580,7 +582,7 @@ class Model:
                         # bnb.functional module is not found by ty for some reason.
                         W = cast(
                             Tensor,
-                            bnb.functional.dequantize_4bit(  # ty:ignore[possibly-missing-attribute]
+                            bnb.functional.dequantize_4bit(  # ty: ignore[possibly-missing-submodule]
                                 base_weight.data,
                                 quant_state,
                             ).to(torch.float32),
@@ -875,7 +877,7 @@ class Model:
             # The TextStreamer constructor annotates this parameter with the AutoTokenizer
             # type, which makes no sense because AutoTokenizer is a factory class,
             # not a base class that tokenizers inherit from.
-            self.tokenizer,  # ty:ignore[invalid-argument-type]
+            self.tokenizer,
             skip_prompt=True,
             skip_special_tokens=True,
         )

@@ -35,7 +35,7 @@ class Analyzer:
             from geom_median.torch import (  # ty:ignore[unresolved-import]
                 compute_geometric_median,
             )
-            from sklearn.metrics import silhouette_score  # ty:ignore[unresolved-import]
+            from sklearn.metrics import silhouette_score
         except ImportError:
             print()
             print(
