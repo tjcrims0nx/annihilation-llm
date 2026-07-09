@@ -12,8 +12,6 @@
 
 ---
 
-> ⚠️ **Note:** Windows is fully supported out of the box. Linux support is currently **under active development** and you may encounter bugs or require manual environment setup (like installing correct GPU drivers).
-
 ## 🔥 What is Annihilation?
 
 **Annihilation** is a fully automatic framework designed to remove censorship (safety alignment) from transformer-based language models. By using advanced parametric directional ablation and TPE-based optimization, it autonomously finds the absolute best parameters to decensor your models without requiring any expensive post-training.
@@ -44,24 +42,14 @@ Once running, monitor everything in real-time. The dashboard features dynamic sp
 
 ---
 
-## ⚠️ Direct CLI Usage (Fallback)
-
-> ⚠️ **NOTICE:** The Rust TUI is currently undergoing a major rewrite to fix freezing bugs on Windows and Linux and is **temporarily broken**. Please use the direct Python CLI in the meantime!
+## ⚠️ Direct CLI Usage (Advanced)
 
 If you want to bypass the TUI entirely and use the core Python CLI, you can run it directly from the virtual environment:
 
-For **Windows** (PowerShell):
 ```powershell
 .\.venv\Scripts\python.exe -m annihilate --help
 # Example:
 .\.venv\Scripts\python.exe -m annihilate --model openbmb/MiniCPM5-1B --n-trials 200
-```
-
-For **Linux / WSL** (Bash):
-```bash
-./.venv/bin/python -m annihilate --help
-# Example:
-./.venv/bin/python -m annihilate --model openbmb/MiniCPM5-1B --n-trials 200
 ```
 
 ---
@@ -71,23 +59,11 @@ For **Linux / WSL** (Bash):
 Ensure you have **Python 3.10+** and **Rust** installed, and that your PyTorch installation supports CUDA (if you are using an NVIDIA GPU).
 
 ### Setup & Launch
-> ✅ **Note:** Windows and Ubuntu (Linux/WSL) are fully supported!
 
-For **Windows** (PowerShell):
 ```powershell
 git clone https://github.com/tjcrims0nx/annihilation-llm.git
 cd annihilation-llm
 .\start.bat
-```
-
-For **Ubuntu / Linux**:
-> ⚠️ **CRITICAL:** Do not use `apt install rustc`. You MUST install the latest secure version of Rust via `rustup` to support modern Rust 2024 features. Run: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-
-```bash
-git clone https://github.com/tjcrims0nx/annihilation-llm.git
-cd annihilation-llm
-chmod +x start.sh
-./start.sh
 ```
 
 > 💡 **Note:** The very first time you run this, it will take a minute to compile the Rust TUI and set up the Python virtual environment. Subsequent launches will be near-instant! You do **not** need to manually build the project; the `start.bat` script handles all compilation and environment setup on the fly.
