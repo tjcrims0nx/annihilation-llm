@@ -1,8 +1,8 @@
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
-import os
 
 
 def main():
