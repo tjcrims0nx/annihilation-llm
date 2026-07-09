@@ -52,6 +52,7 @@ import os
 # importing these C-extensions first to avoid DLL/mimalloc conflicts with optuna/lm_eval.
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import torch
+
 try:
     import pyarrow
 except ImportError:
@@ -442,7 +443,9 @@ def run():
         accelerator_info = get_accelerator_info()
         if accelerator_info == "Unknown":
             print()
-            print("No accelerator detected. Defaulting to batch size 1 to prevent system RAM thrashing.")
+            print(
+                "No accelerator detected. Defaulting to batch size 1 to prevent system RAM thrashing."
+            )
             settings.batch_size = 1
         else:
             print()

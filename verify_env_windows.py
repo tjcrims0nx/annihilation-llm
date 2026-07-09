@@ -50,13 +50,17 @@ def main():
         # Use a subprocess to check CUDA availability without loading the DLL into this process
         try:
             result = subprocess.run(
-                [sys.executable, "-c", "import torch; print(torch.cuda.is_available())"],
+                [
+                    sys.executable,
+                    "-c",
+                    "import torch; print(torch.cuda.is_available())",
+                ],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
             )
             has_cuda = result.stdout.strip() == "True"
-            
+
             if not has_cuda:
                 print(
                     "GPU detected but PyTorch is CPU-only. Installing CUDA version...",
