@@ -32,7 +32,7 @@ class Analyzer:
 
     def print_residual_geometry(self):
         try:
-            from geom_median.torch import (  # ty:ignore[unresolved-import]
+            from geom_median.torch import (
                 compute_geometric_median,
             )
             from sklearn.metrics import silhouette_score
@@ -156,12 +156,12 @@ class Analyzer:
 
     def plot_residuals(self):
         try:
-            import imageio.v3 as iio  # ty:ignore[unresolved-import]
-            import matplotlib.pyplot as plt  # ty:ignore[unresolved-import]
-            from geom_median.numpy import (  # ty:ignore[unresolved-import]
+            import imageio.v3 as iio
+            import matplotlib.pyplot as plt
+            from geom_median.numpy import (
                 compute_geometric_median,
             )
-            from pacmap import PaCMAP  # ty:ignore[unresolved-import]
+            from pacmap import PaCMAP
         except ImportError:
             print()
             print(
