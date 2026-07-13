@@ -20,7 +20,7 @@
 - 🤖 **Fully Autonomous**: No human intervention required.
 - 🖥️ **Terminal UI**: A beautiful, real-time dashboard built in Rust.
 - ⚡ **Zero-Shot Decensoring**: Removes refusals while preserving the model's core capabilities.
-- 🎯 **Broad Compatibility**: Works with dense models, MoE, hybrid, and multimodal architectures.
+- 🎯 **Model Compatibility**: Validated on supported dense decoder-only models. MoE, hybrid, and multimodal architectures are experimental and not guaranteed; verify tensor targeting and output quality for each model.
 
 ---
 
