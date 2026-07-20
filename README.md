@@ -43,6 +43,16 @@ Once running, monitor everything in real-time. The dashboard features dynamic sp
 
 ---
 
+## 🌌 OBLITERATUS Advanced Options
+
+You can now toggle experimental algorithms directly from the TUI configuration menu by selecting **OBLITERATUS Advanced**. This enables:
+
+- **COSMIC Layer Selection**: Instead of blindly searching across the entire network, the system analyzes cosine similarities between harmless and harmful residual streams. It automatically anchors the optimization process around the mathematically proven optimal layer, massively reducing the search space.
+- **Expert-Granular Abliteration (EGA)**: For Mixture-of-Experts (MoE) models, EGA calculates the alignment score of each expert's weight matrix against the target refusal direction. Instead of applying a flat penalty, experts containing high concentrations of refusal vectors are aggressively modified while benign knowledge experts are perfectly preserved.
+- **Gaussian-shaped Ablation Kernels**: Replaces traditional rigid interpolation bounds with a smooth, bell-shaped Gaussian curve to distribute weight changes across adjacent layers. This results in smoother vector blending and better text coherence post-ablation.
+
+---
+
 ## ⚠️ Direct CLI Usage (Advanced)
 
 If you want to bypass the TUI entirely and use the core Python CLI, you can run it directly from the virtual environment:
