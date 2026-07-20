@@ -588,7 +588,9 @@ def run():
         min_sim_index = torch.argmin(similarities[1:]).item() + 1
         # The direction index corresponds to transformer layer index, so subtract 1
         cosmic_layer_index = float(min_sim_index - 1)
-        print(f"* COSMIC selected optimal layer index: [bold]{cosmic_layer_index}[/] (Similarity: {similarities[min_sim_index].item():.4f})")
+        print(
+            f"* COSMIC selected optimal layer index: [bold]{cosmic_layer_index}[/] (Similarity: {similarities[min_sim_index].item():.4f})"
+        )
 
     if settings.orthogonalize_direction:
         # Implements https://huggingface.co/blog/grimjim/projected-abliteration

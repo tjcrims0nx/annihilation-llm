@@ -532,13 +532,17 @@ class Model:
                 # Interpolate between max_weight and min_weight over min_weight_distance.
                 if self.settings.kernel_type == KernelType.GAUSSIAN:
                     # Gaussian bell-curve interpolation
-                    distance_norm = distance / max(1e-5, params.min_weight_distance / 2.0)
-                    weight = params.min_weight + (params.max_weight - params.min_weight) * math.exp(-0.5 * distance_norm ** 2)
+                    distance_norm = distance / max(
+                        1e-5, params.min_weight_distance / 2.0
+                    )
+                    weight = params.min_weight + (
+                        params.max_weight - params.min_weight
+                    ) * math.exp(-0.5 * distance_norm**2)
                 else:
                     # Linear interpolation
-                    weight = params.max_weight + (distance / params.min_weight_distance) * (
-                        params.min_weight - params.max_weight
-                    )
+                    weight = params.max_weight + (
+                        distance / params.min_weight_distance
+                    ) * (params.min_weight - params.max_weight)
 
                 # A weight of 0 disables this component's ablation. reset_model() has
                 # already left the adapter at identity, so abort before the otherwise
