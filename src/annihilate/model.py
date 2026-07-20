@@ -31,7 +31,7 @@ from transformers.generation import (
     GenerateDecoderOnlyOutput,
 )
 
-from .config import QuantizationMethod, RowNormalization, Settings, KernelType
+from .config import KernelType, QuantizationMethod, RowNormalization, Settings
 from .system import empty_cache
 from .utils import Prompt, batchify, format_exception, print
 
