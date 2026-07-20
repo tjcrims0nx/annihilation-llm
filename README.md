@@ -20,6 +20,7 @@
 - 🤖 **Fully Autonomous**: No human intervention required.
 - 🖥️ **Terminal UI**: A beautiful, real-time dashboard built in Rust.
 - ⚡ **Zero-Shot Decensoring**: Removes refusals while preserving the model's core capabilities.
+- 🌌 **OBLITERATUS Integration**: Advanced experimental algorithms (COSMIC Layer Selection, Gaussian-shaped ablation kernels, and Expert-Granular Abliteration) integrated directly from OBLITERATUS.
 - 🎯 **Broad Transformer Compatibility**: Supports transformer-based dense, MoE, hybrid, and multimodal architectures. Less-tested model families may require architecture-specific tensor targeting and output-quality validation.
 
 ---

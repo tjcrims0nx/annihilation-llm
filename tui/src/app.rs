@@ -150,6 +150,7 @@ pub struct App {
     pub annihilate_available: bool,
     pub plot_residuals: bool,
     pub quantize: bool,
+    pub use_obliteratus: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -214,6 +215,7 @@ impl App {
             annihilate_available: false,
             plot_residuals: false,
             quantize: false,
+            use_obliteratus: true,
         }
     }
 
@@ -360,7 +362,7 @@ impl App {
                                             LogLevel::Error
                                         ));
                                     self.log_lines.push((
-                                            "FIX THIS BY RUNNING: `uv pip install --python annihilation-env torch torchvision --index-url https://download.pytorch.org/whl/cu121 --upgrade`".to_string(),
+                                            "FIX THIS BY RUNNING: `uv pip install --python annihilation-env torch torchvision --index-url https://download.pytorch.org/whl/cu126 --upgrade`".to_string(),
                                             LogLevel::Error
                                         ));
                                 }
@@ -386,6 +388,17 @@ impl App {
                                 if self.quantize {
                                     extra_args.push("--quantization".to_string());
                                     extra_args.push("bnb_4bit".to_string());
+                                }
+
+                                if self.use_obliteratus {
+                                    extra_args.push("--kernel-type".to_string());
+                                    extra_args.push("gaussian".to_string());
+                                    // By default use_cosmic_layer_selection and use_ega are true in config.py
+                                } else {
+                                    extra_args.push("--kernel-type".to_string());
+                                    extra_args.push("linear".to_string());
+                                    extra_args.push("--no-use-cosmic-layer-selection".to_string());
+                                    extra_args.push("--no-use-ega".to_string());
                                 }
 
                                 self.subprocess =
@@ -568,6 +581,10 @@ impl App {
                             MenuItem::new("Quick Test (50 trials)", "Faster run for testing"),
                             MenuItem::new("Aggressive (400 trials)", "More thorough optimization"),
                             MenuItem::new("4-bit Quantized", "Lower VRAM usage with bnb_4bit"),
+                            MenuItem::new(
+                                "OBLITERATUS Advanced",
+                                "Gaussian kernel, COSMIC selection, and MoE EGA",
+                            ).with_key("O"),
                             MenuItem::new("Set HF Token", "Required for private models or uploading to Hub").with_key("T"),
                             MenuItem::new("Back", "Return to main menu").with_key("Esc"),
                         ];
@@ -769,20 +786,29 @@ impl App {
                     Some(0) => {
                         self.total_trials = 200;
                         self.quantize = false;
+                        self.use_obliteratus = false;
                     }
                     Some(1) => {
                         self.total_trials = 50;
                         self.quantize = false;
+                        self.use_obliteratus = false;
                     }
                     Some(2) => {
                         self.total_trials = 400;
                         self.quantize = false;
+                        self.use_obliteratus = false;
                     }
                     Some(3) => {
                         self.total_trials = 200;
                         self.quantize = true;
+                        self.use_obliteratus = false;
                     }
                     Some(4) => {
+                        self.total_trials = 200;
+                        self.quantize = false;
+                        self.use_obliteratus = true;
+                    }
+                    Some(5) => {
                         self.screen = Screen::TokenInput;
                         self.hf_token_cursor = self.hf_token_input.len();
                         return; // Don't go back to splash
@@ -790,7 +816,9 @@ impl App {
                     _ => {}
                 }
                 self.go_back_to_splash();
-                self.status_message = if self.quantize {
+                self.status_message = if self.use_obliteratus {
+                    format!("Config: {} trials, OBLITERATUS Advanced", self.total_trials)
+                } else if self.quantize {
                     format!("Config: {} trials, 4-bit", self.total_trials)
                 } else {
                     format!("Config: {} trials", self.total_trials)
@@ -853,10 +881,14 @@ impl App {
                     MenuItem::new("Quick Test (50 trials)", "Faster run for testing"),
                     MenuItem::new("Aggressive (400 trials)", "More thorough optimization"),
                     MenuItem::new("4-bit Quantized", "Lower VRAM usage with bnb_4bit"),
+                    MenuItem::new(
+                        "OBLITERATUS Advanced",
+                        "Gaussian kernel, COSMIC selection, and MoE EGA",
+                    ).with_key("O"),
                     MenuItem::new("Set HF Token", "Required for private models or uploading to Hub").with_key("T"),
                     MenuItem::new("Back", "Return to main menu").with_key("Esc"),
                 ];
-                self.menu_state.select(Some(4));
+                self.menu_state.select(Some(5));
             }
             KeyCode::Esc => {
                 self.screen = Screen::ConfigSelect;
@@ -868,10 +900,14 @@ impl App {
                     MenuItem::new("Quick Test (50 trials)", "Faster run for testing"),
                     MenuItem::new("Aggressive (400 trials)", "More thorough optimization"),
                     MenuItem::new("4-bit Quantized", "Lower VRAM usage with bnb_4bit"),
+                    MenuItem::new(
+                        "OBLITERATUS Advanced",
+                        "Gaussian kernel, COSMIC selection, and MoE EGA",
+                    ).with_key("O"),
                     MenuItem::new("Set HF Token", "Required for private models or uploading to Hub").with_key("T"),
                     MenuItem::new("Back", "Return to main menu").with_key("Esc"),
                 ];
-                self.menu_state.select(Some(4));
+                self.menu_state.select(Some(5));
             }
             KeyCode::Char(c) => {
                 self.hf_token_input.insert(self.hf_token_cursor, c);

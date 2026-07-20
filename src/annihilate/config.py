@@ -25,6 +25,11 @@ class QuantizationMethod(str, Enum):
     BNB_4BIT = "bnb_4bit"
 
 
+class KernelType(str, Enum):
+    LINEAR = "linear"
+    GAUSSIAN = "gaussian"
+
+
 class RowNormalization(str, Enum):
     NONE = "none"
     PRE = "pre"
@@ -313,6 +318,31 @@ class Settings(BaseSettings):
             '"none" (no normalization), '
             '"pre" (compute LoRA adapter relative to row-normalized weights), '
             '"full" (like "pre", but renormalizes to preserve original row magnitudes).'
+        ),
+    )
+
+    kernel_type: KernelType = Field(
+        default=KernelType.LINEAR,
+        description=(
+            "Type of spatial kernel to use for scaling layer ablation weights. Options: "
+            '"linear" (linear interpolation), '
+            '"gaussian" (Gaussian bell-curve interpolation, allows for smoother ablation).'
+        ),
+    )
+
+    use_cosmic_layer_selection: bool = Field(
+        default=True,
+        description=(
+            "Whether to automatically center the ablation at the layer with the lowest cosine similarity "
+            "between good and bad prompts (COSMIC Layer Selection). If true, it guides the optimizer search."
+        ),
+    )
+
+    use_ega: bool = Field(
+        default=True,
+        description=(
+            "Whether to use Expert-Granular Abliteration (EGA) for MoE models, which scales the intervention "
+            "on experts based on their alignment with the refusal direction."
         ),
     )
 

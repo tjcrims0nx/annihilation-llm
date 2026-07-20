@@ -579,6 +579,17 @@ def run():
 
     refusal_directions = F.normalize(bad_means - good_means, p=2, dim=1)
 
+    cosmic_layer_index = None
+    if settings.use_cosmic_layer_selection:
+        print("* Performing COSMIC layer selection...")
+        # good_means and bad_means have shape (layers + 1, hidden_dim) where 0 is embedding
+        similarities = F.cosine_similarity(good_means, bad_means, dim=1)
+        # Ignore embedding layer (index 0) and find the layer with the lowest similarity
+        min_sim_index = torch.argmin(similarities[1:]).item() + 1
+        # The direction index corresponds to transformer layer index, so subtract 1
+        cosmic_layer_index = float(min_sim_index - 1)
+        print(f"* COSMIC selected optimal layer index: [bold]{cosmic_layer_index}[/] (Similarity: {similarities[min_sim_index].item():.4f})")
+
     if settings.orthogonalize_direction:
         # Implements https://huggingface.co/blog/grimjim/projected-abliteration
         # Adjust the refusal directions so that only the component that is
@@ -623,11 +634,18 @@ def run():
         # Note that we always sample this parameter even though we only need it for
         # the "global" direction scope. The reason is that multivariate TPE doesn't
         # work with conditional or variable-range parameters.
-        direction_index = trial.suggest_float(
-            "direction_index",
-            0.4 * last_layer_index,
-            0.9 * last_layer_index,
-        )
+        if cosmic_layer_index is not None:
+            direction_index = trial.suggest_float(
+                "direction_index",
+                max(0.0, cosmic_layer_index - 3.0),
+                min(float(last_layer_index), cosmic_layer_index + 3.0),
+            )
+        else:
+            direction_index = trial.suggest_float(
+                "direction_index",
+                0.4 * last_layer_index,
+                0.9 * last_layer_index,
+            )
 
         if direction_scope == "per layer":
             direction_index = None
@@ -655,11 +673,18 @@ def run():
                     1.5,
                 ),
             )
-            max_weight_position = trial.suggest_float(
-                f"{component}.max_weight_position",
-                0.6 * last_layer_index,
-                1.0 * last_layer_index,
-            )
+            if cosmic_layer_index is not None:
+                max_weight_position = trial.suggest_float(
+                    f"{component}.max_weight_position",
+                    max(0.0, cosmic_layer_index - 3.0),
+                    min(float(last_layer_index), cosmic_layer_index + 3.0),
+                )
+            else:
+                max_weight_position = trial.suggest_float(
+                    f"{component}.max_weight_position",
+                    0.6 * last_layer_index,
+                    1.0 * last_layer_index,
+                )
             # For sampling purposes, min_weight is expressed as a fraction of max_weight,
             # again because multivariate TPE doesn't support variable-range parameters.
             # The value is transformed into the actual min_weight value below.

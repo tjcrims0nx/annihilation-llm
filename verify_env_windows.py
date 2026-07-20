@@ -39,7 +39,7 @@ def main():
             cmd = [sys.executable, "-m", "pip", "install", ".", "--no-cache-dir"]
             if is_gpu:
                 cmd.extend(
-                    ["--extra-index-url", "https://download.pytorch.org/whl/cu121"]
+                    ["--extra-index-url", "https://download.pytorch.org/whl/cu126"]
                 )
             print(f"Running: {' '.join(cmd)}", flush=True)
             subprocess.run(cmd, check=True)
@@ -74,7 +74,7 @@ def main():
                         "install",
                         "torch",
                         "--index-url",
-                        "https://download.pytorch.org/whl/cu121",
+                        "https://download.pytorch.org/whl/cu126",
                         "--reinstall",
                         "--no-progress",
                     ]
@@ -86,7 +86,7 @@ def main():
                         "install",
                         "torch",
                         "--index-url",
-                        "https://download.pytorch.org/whl/cu121",
+                        "https://download.pytorch.org/whl/cu126",
                         "--force-reinstall",
                         "--no-cache-dir",
                     ]

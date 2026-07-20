@@ -31,7 +31,7 @@ from transformers.generation import (
     GenerateDecoderOnlyOutput,
 )
 
-from .config import QuantizationMethod, RowNormalization, Settings
+from .config import QuantizationMethod, RowNormalization, Settings, KernelType
 from .system import empty_cache
 from .utils import Prompt, batchify, format_exception, print
 
@@ -529,11 +529,16 @@ class Model:
                 if distance > params.min_weight_distance:
                     continue
 
-                # Interpolate linearly between max_weight and min_weight
-                # over min_weight_distance.
-                weight = params.max_weight + (distance / params.min_weight_distance) * (
-                    params.min_weight - params.max_weight
-                )
+                # Interpolate between max_weight and min_weight over min_weight_distance.
+                if self.settings.kernel_type == KernelType.GAUSSIAN:
+                    # Gaussian bell-curve interpolation
+                    distance_norm = distance / max(1e-5, params.min_weight_distance / 2.0)
+                    weight = params.min_weight + (params.max_weight - params.min_weight) * math.exp(-0.5 * distance_norm ** 2)
+                else:
+                    # Linear interpolation
+                    weight = params.max_weight + (distance / params.min_weight_distance) * (
+                        params.min_weight - params.max_weight
+                    )
 
                 # A weight of 0 disables this component's ablation. reset_model() has
                 # already left the adapter at identity, so abort before the otherwise
@@ -604,9 +609,22 @@ class Model:
                     # v @ W -> (d_in,)
                     lora_A = (v @ W).view(1, -1)
 
-                    # Calculate lora_B = -weight * v
+                    current_weight = weight
+                    if getattr(self.settings, "use_ega", False) and len(modules) > 1:
+                        # MoE Expert-Granular Abliteration (EGA) heuristic
+                        # Scale the intervention based on how much the refusal direction is represented in the expert's weight matrix.
+                        w_norm = torch.norm(W)
+                        lora_A_norm = torch.norm(lora_A)
+                        if w_norm > 0:
+                            alignment = (lora_A_norm / w_norm).item()
+                            # Scale the weight up to 1x based on alignment (amplified by a constant factor)
+                            # to selectively target aligned experts while preserving others.
+                            ega_scale = min(1.0, alignment * 20.0)
+                            current_weight = current_weight * ega_scale
+
+                    # Calculate lora_B = -current_weight * v
                     # v is (d_out,)
-                    lora_B = (-weight * v).view(-1, 1)
+                    lora_B = (-current_weight * v).view(-1, 1)
 
                     if self.settings.row_normalization == RowNormalization.PRE:
                         # Make the LoRA adapter apply to the original weight matrix.
