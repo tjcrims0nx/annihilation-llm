@@ -213,6 +213,54 @@ fn char_len(s: &str) -> usize {
     s.chars().count()
 }
 
+/// Visual line count for `text` rendered into a pane `width` columns wide.
+///
+/// Mirrors how `Paragraph` with `Wrap` lays text out, so scroll bounds can be
+/// computed before rendering — ratatui does not expose the wrapped height.
+/// Breaks on whitespace, and hard-splits any word longer than the pane.
+fn wrapped_line_count(text: &str, width: usize) -> usize {
+    if width == 0 {
+        // Degenerate pane; treat every explicit line as one row so callers
+        // never divide by zero or under-count to zero.
+        return text.lines().count().max(1);
+    }
+
+    let mut lines = 0;
+
+    for segment in text.split('\n') {
+        let mut column = 0;
+        let mut segment_lines = 1;
+
+        for word in segment.split_whitespace() {
+            let word_width = char_len(word);
+
+            if column == 0 {
+                // A word wider than the pane wraps onto further rows itself.
+                segment_lines += word_width.saturating_sub(1) / width;
+                column = if word_width % width == 0 && word_width > 0 {
+                    width
+                } else {
+                    word_width % width
+                };
+            } else if column + 1 + word_width <= width {
+                column += 1 + word_width;
+            } else {
+                segment_lines += 1;
+                segment_lines += word_width.saturating_sub(1) / width;
+                column = if word_width % width == 0 && word_width > 0 {
+                    width
+                } else {
+                    word_width % width
+                };
+            }
+        }
+
+        lines += segment_lines;
+    }
+
+    lines.max(1)
+}
+
 // ─── Menu System ───────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -300,6 +348,8 @@ pub struct App {
     pub chat_messages: Vec<(String, String)>, // (role, content)
     pub chat_input: String,
     pub chat_scroll: usize,
+    /// Stick to the newest message until the user scrolls up deliberately.
+    pub chat_auto_scroll: bool,
     pub chat_subprocess: Option<SubprocessManager>,
     pub chat_loading: bool,
     pub chat_streaming: bool,
@@ -375,6 +425,7 @@ impl App {
             chat_messages: Vec::new(),
             chat_input: String::new(),
             chat_scroll: 0,
+            chat_auto_scroll: true,
             chat_subprocess: None,
             chat_loading: false,
             chat_streaming: false,
@@ -856,6 +907,20 @@ impl App {
                     _ => {}
                 }
             }
+            Screen::Chat => match mouse.kind {
+                MouseEventKind::ScrollUp => {
+                    self.chat_scroll = self.chat_scroll.saturating_sub(1);
+                    // Any deliberate scroll back detaches from the live tail.
+                    self.chat_auto_scroll = false;
+                }
+                MouseEventKind::ScrollDown => {
+                    self.chat_scroll += 1;
+                    // Clamped against the wrapped height in render_chat, which
+                    // is the only place the pane width is known.
+                    self.chat_auto_scroll = false;
+                }
+                _ => {}
+            },
             // Add other screen mouse handling here if needed
             _ => {}
         }
@@ -1482,6 +1547,9 @@ impl App {
                     let msg = self.chat_input.clone();
                     self.chat_messages.push(("user".to_string(), msg.clone()));
                     self.chat_input.clear();
+                    // Jump back to the tail so the user sees their own message
+                    // and the reply streaming in.
+                    self.chat_auto_scroll = true;
 
                     let chat_history: Vec<serde_json::Value> = self.chat_messages.iter()
                         .filter(|(role, _)| role == "user" || role == "assistant")
@@ -1507,6 +1575,32 @@ impl App {
                         self.chat_messages.push(("system".to_string(), "Chat server not running. Press Esc and try again.".to_string()));
                     }
                 }
+            }
+            // Scrollback. These sit above the Char arm so they are not
+            // swallowed as message text.
+            KeyCode::PageUp => {
+                self.chat_scroll = self.chat_scroll.saturating_sub(10);
+                self.chat_auto_scroll = false;
+            }
+            KeyCode::PageDown => {
+                self.chat_scroll += 10;
+                self.chat_auto_scroll = false;
+            }
+            KeyCode::Up => {
+                self.chat_scroll = self.chat_scroll.saturating_sub(1);
+                self.chat_auto_scroll = false;
+            }
+            KeyCode::Down => {
+                self.chat_scroll += 1;
+                self.chat_auto_scroll = false;
+            }
+            KeyCode::Home => {
+                self.chat_scroll = 0;
+                self.chat_auto_scroll = false;
+            }
+            KeyCode::End => {
+                // Re-attach to the live tail; render_chat pins the offset.
+                self.chat_auto_scroll = true;
             }
             KeyCode::Char(c) => {
                 if !self.chat_loading {
@@ -3065,7 +3159,7 @@ impl App {
 
     // ─── Chat Screen ───────────────────────────────────────────
 
-    fn render_chat(&self, frame: &mut Frame, area: Rect) {
+    fn render_chat(&mut self, frame: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -3114,13 +3208,40 @@ impl App {
             })
             .collect();
 
-        let messages = Paragraph::new(msg_lines).wrap(Wrap { trim: false }).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme::BORDER_INACTIVE))
-                .style(Style::default().bg(theme::BG_SURFACE)),
-        );
+        // The pane wraps, so the scrollable extent is the number of *visual*
+        // lines after wrapping, not the number of messages. Counting messages
+        // here would clamp the scroll far too early and re-hide the tail.
+        let inner_width = chunks[1].width.saturating_sub(2) as usize;
+        let inner_height = chunks[1].height.saturating_sub(2) as usize;
+        let total_lines: usize = self
+            .chat_messages
+            .iter()
+            .map(|(_, content)| {
+                // Every message renders as its (7-column) prefix and body on one
+                // wrapped line, followed by a blank spacer line.
+                wrapped_line_count(content, inner_width.saturating_sub(7)) + 1
+            })
+            .sum();
+
+        let max_scroll = total_lines.saturating_sub(inner_height);
+
+        // Follow the newest output unless the user has scrolled up to read back.
+        if self.chat_auto_scroll {
+            self.chat_scroll = max_scroll;
+        } else if self.chat_scroll > max_scroll {
+            self.chat_scroll = max_scroll;
+        }
+
+        let messages = Paragraph::new(msg_lines)
+            .wrap(Wrap { trim: false })
+            .scroll((self.chat_scroll as u16, 0))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                    .style(Style::default().bg(theme::BG_SURFACE)),
+            );
         frame.render_widget(messages, chunks[1]);
 
         // Input
@@ -3383,10 +3504,11 @@ impl App {
             Span::styled(&self.status_message, theme::status_bar_style()),
             Span::styled(
                 format!(
-                    "{}v0.1.0 ",
+                    "{}v{} ",
                     " ".repeat(
                         (area.width as usize).saturating_sub(self.status_message.len() + 20)
-                    )
+                    ),
+                    env!("ANNIHILATE_VERSION")
                 ),
                 theme::status_bar_style(),
             ),
