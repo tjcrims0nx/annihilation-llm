@@ -3,7 +3,7 @@
 # Copyright (C) 2025-2026  grimxlock + contributors (Annihilate fork)
 
 import math
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from typing import Any, Type, cast
 
@@ -235,16 +235,62 @@ class Model:
 
         print(f"* Transformer model with [bold]{len(self.get_layers())}[/] layers")
 
-        all_components = {}
-        for layer_index in range(len(self.get_layers())):
+        layer_count = len(self.get_layers())
+
+        all_components: dict[str, int] = {}
+        # How many layers each component was found on, which is not implied by the
+        # module count: MoE layers contribute one module per expert.
+        component_layers: dict[str, int] = {}
+        for layer_index in range(layer_count):
             for component, modules in self.get_layer_modules(layer_index).items():
-                if component not in all_components:
-                    all_components[component] = 0
-                all_components[component] += len(modules)
+                all_components[component] = all_components.get(component, 0) + len(
+                    modules
+                )
+                component_layers[component] = component_layers.get(component, 0) + 1
 
         print("* Abliterable components:")
         for component, count in all_components.items():
-            print(f"  * [bold]{component}[/]: [bold]{count}[/] modules total")
+            covered = component_layers[component]
+            coverage = (
+                ""
+                if covered == layer_count
+                else f" (on {covered}/{layer_count} layers)"
+            )
+            print(f"  * [bold]{component}[/]: [bold]{count}[/] modules total{coverage}")
+
+        # Abliteration applies to whatever was targeted, so a component that is
+        # absent - or present on only some layers - still yields a run that reports
+        # success while leaving part of the refusal behaviour untouched. Say so here
+        # rather than letting it surface later as an unexplained weak decensor.
+        missing = [
+            family
+            for family, prefix in (("attention", "attn."), ("MLP", "mlp."))
+            if not any(component.startswith(prefix) for component in all_components)
+        ]
+        partial = sorted(
+            component
+            for component, covered in component_layers.items()
+            if covered < layer_count
+        )
+
+        if missing or partial:
+            print()
+            if missing:
+                print(
+                    f"[yellow]WARNING: No {' or '.join(missing)} modules could be "
+                    "targeted in this model.[/]"
+                )
+            if partial:
+                print(
+                    "[yellow]WARNING: Some layers are not fully targeted: "
+                    f"[bold]{', '.join(partial)}[/] missing from part of the model.[/]"
+                )
+            print(
+                "[yellow]This architecture is only partially supported. Abliteration "
+                "will still run, but the untargeted parts are left unchanged, so "
+                "validate the output quality. Adding architecture-specific targeting "
+                "to get_layer_modules() would cover the rest.[/]"
+            )
 
     def _apply_lora(self):
         # Guard against calling this method at the wrong time.
@@ -450,69 +496,97 @@ class Model:
         modules = {}
 
         def try_add(component: str, module: Any):
-            # Only add if it's a proper nn.Module (PEFT can wrap these with LoRA)
+            # Only add if it's a proper nn.Module (PEFT can wrap these with LoRA).
             if isinstance(module, Module):
                 if component not in modules:
                     modules[component] = []
                 modules[component].append(module)
-            else:
-                # Assert for unexpected types (catches architecture changes)
-                assert not isinstance(module, Tensor), (
-                    f"Unexpected Tensor in {component} - expected nn.Module"
+            elif isinstance(module, Tensor):
+                # The attribute exists at the path we expect but is a raw weight
+                # rather than a module, which means the architecture moved. Raise
+                # something `probe` will not swallow: silently skipping it would
+                # abliterate a partially targeted model and report success.
+                raise UnsupportedModelFormatError(
+                    f"Unexpected Tensor at {component} in layer {layer_index} - "
+                    "expected nn.Module. This model's architecture is not "
+                    "supported by the current tensor targeting."
                 )
+
+        @contextmanager
+        def probe():
+            """Try one architecture-specific attribute path.
+
+            A missing path is how this function tests for an architecture, so
+            `AttributeError`/`IndexError`/`TypeError` are expected and ignored.
+            `UnsupportedModelFormatError` is not: it means the path was found but
+            held something unusable, which must reach the caller.
+
+            The previous version suppressed every `Exception`, which included the
+            `AssertionError` raised for that case, so the check meant to catch
+            architecture changes could never fire.
+            """
+            try:
+                yield
+            except (AttributeError, IndexError, TypeError):
+                pass
 
         any_layer: Any = layer
 
         # Standard self-attention out-projection (most models).
-        with suppress(Exception):
+        with probe():
             try_add("attn.o_proj", any_layer.self_attn.o_proj)
 
         # Qwen3.5 MoE hybrid layers use GatedDeltaNet (linear attention) instead of
         # standard self-attention, so self_attn.o_proj doesn't exist on those layers.
-        with suppress(Exception):
+        with probe():
             try_add("attn.o_proj", any_layer.linear_attn.out_proj)
 
         # Most dense models.
-        with suppress(Exception):
+        with probe():
             try_add("mlp.down_proj", any_layer.mlp.down_proj)
 
         # Some MoE models (e.g. Qwen3).
-        with suppress(Exception):
+        with probe():
             for expert in any_layer.mlp.experts:
                 try_add("mlp.down_proj", expert.down_proj)
 
         # Phi-3.5-MoE (and possibly others).
-        with suppress(Exception):
+        with probe():
             for expert in any_layer.block_sparse_moe.experts:
                 try_add("mlp.down_proj", expert.w2)
 
         # LFM dense operator blocks.
-        with suppress(Exception):
+        with probe():
             try_add("attn.o_proj", any_layer.conv.out_proj)
 
-        with suppress(Exception):
+        with probe():
             try_add("mlp.down_proj", any_layer.feed_forward.w2)
 
         # LFM transformer blocks.
-        with suppress(Exception):
+        with probe():
             try_add("attn.o_proj", any_layer.self_attn.out_proj)
 
-        with suppress(Exception):
+        with probe():
             for expert in any_layer.feed_forward.experts:
                 try_add("mlp.down_proj", expert.w2)
 
         # Granite MoE Hybrid - attention layers with shared_mlp.
-        with suppress(Exception):
+        with probe():
             try_add("mlp.down_proj", any_layer.shared_mlp.output_linear)
 
         # Granite MoE Hybrid - MoE layers with experts.
-        with suppress(Exception):
+        with probe():
             for expert in any_layer.moe.experts:
                 try_add("mlp.down_proj", expert.output_linear)
 
         # We need at least one module across all components for abliteration to work.
         total_modules = sum(len(mods) for mods in modules.values())
-        assert total_modules > 0, "No abliterable modules found in layer"
+        if total_modules == 0:
+            raise UnsupportedModelFormatError(
+                f"No abliterable modules found in layer {layer_index}. This "
+                "model's architecture needs architecture-specific tensor "
+                "targeting added to get_layer_modules()."
+            )
 
         return modules
 
