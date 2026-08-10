@@ -40,4 +40,40 @@ jobs:
       - name: Check typing
         run: uv run ty check --output-format=github --error-on-warning .
 
+  tui:
+    name: Check and build TUI
+    # The TUI is a Windows application: it shells out to powershell and resolves
+    # the venv interpreter at Scripts/python.exe. Building it anywhere else
+    # would pass without exercising the platform it actually ships on.
+    runs-on: windows-latest
 
+    defaults:
+      run:
+        working-directory: tui
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: tui
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      # --locked so a stale Cargo.lock fails here rather than being silently
+      # rewritten. build.rs also fails the build if tui/Cargo.toml and
+      # pyproject.toml disagree on the version, which is the drift this job
+      # exists to catch: a bump touching only pyproject.toml used to pass CI.
+      - name: Build
+        run: cargo build --locked --release
+
+      - name: Test
+        run: cargo test --locked --release
