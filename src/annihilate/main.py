@@ -31,9 +31,30 @@ def _is_help_invocation() -> bool:
     return "-h" in args or "--help" in args
 
 
+def _is_version_invocation() -> bool:
+    args = sys.argv[1:]
+    return "-V" in args or "--version" in args
+
+
 # Parse and handle CLI help before importing heavyweight ML/runtime dependencies.
 if _is_help_invocation():
     Settings()  # ty:ignore[missing-argument]
+
+# Same for --version. The settings parser rejects it as an unrecognized
+# argument, and resolving it through system.py would import torch, so answer
+# it here from package metadata alone.
+if _is_version_invocation():
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _version
+
+    try:
+        print(f"annihilate-llm {_version('annihilate-llm')}")
+    except PackageNotFoundError:
+        # Running from a source tree that was never installed, so there is no
+        # dist metadata to read a version from.
+        print("annihilate-llm (unknown version; package metadata not found)")
+
+    sys.exit(0)
 
 # FIXME: Rich progress bars are currently disabled because of rendering issues
 #        when used from multiple threads in parallel (e.g. by huggingface_hub).
