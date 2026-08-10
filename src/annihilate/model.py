@@ -6,7 +6,6 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Type, cast
 
-import bitsandbytes as bnb
 import torch
 import torch.linalg as LA
 import torch.nn.functional as F
@@ -589,6 +588,7 @@ class Model:
                         # 4-bit quantization.
                         # This cast is always valid. Type inference fails here because the
                         # bnb.functional module is not found by ty for some reason.
+                        import bitsandbytes as bnb
                         W = cast(
                             Tensor,
                             bnb.functional.dequantize_4bit(  # ty: ignore[possibly-missing-submodule]
@@ -877,7 +877,7 @@ class Model:
 
         return torch.cat(logprobs, dim=0)
 
-    def stream_chat_response(self, chat: list[dict[str, str]]) -> str:
+    def stream_chat_response(self, chat: list[dict[str, str]], streamer=None) -> str:
         # This cast is valid because str is the return type
         # for single-chat operation with tokenize=False.
         chat_prompt = cast(
@@ -895,14 +895,15 @@ class Model:
             return_token_type_ids=False,
         ).to(self.model.device)
 
-        streamer = TextStreamer(
-            # The TextStreamer constructor annotates this parameter with the AutoTokenizer
-            # type, which makes no sense because AutoTokenizer is a factory class,
-            # not a base class that tokenizers inherit from.
-            self.tokenizer,
-            skip_prompt=True,
-            skip_special_tokens=True,
-        )
+        if streamer is None:
+            streamer = TextStreamer(
+                # The TextStreamer constructor annotates this parameter with the AutoTokenizer
+                # type, which makes no sense because AutoTokenizer is a factory class,
+                # not a base class that tokenizers inherit from.
+                self.tokenizer,
+                skip_prompt=True,
+                skip_special_tokens=True,
+            )
 
         # FIXME: The type checker has been disabled here because of the extremely complex
         #        interplay between different generate() signatures and dynamic delegation.

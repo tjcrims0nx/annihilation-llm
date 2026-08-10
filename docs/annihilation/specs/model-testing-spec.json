@@ -1,0 +1,85 @@
+{
+  "model-testing": {
+    "title": "Model Feature Testing Workflow",
+    "version": "1.0",
+    "description": "Comprehensive testing of all model features",
+    "features": [
+      {
+        "name": "Chat with Model",
+        "script": "scripts/chat_server.py",
+        "description": "Interactive chat testing with decensored model",
+        "command": "python scripts/chat_server.py <model_name>",
+        "success_criteria": "Can send JSON chat messages, receive streamed tokens, maintain chat context",
+        "test_scenarios": [
+          "Basic Q&A",
+          "Multi-turn conversation",
+          "Error handling",
+          "Model personality preservation"
+        ]
+      },
+      {
+        "name": "Benchmark Model",
+        "script": "scripts/run_benchmarks.py",
+        "description": "Evaluate model performance on standard benchmarks",
+        "command": "python scripts/run_benchmarks.py <model_name> [benchmark1,benchmark2]",
+        "success_criteria": "Can run lm-eval, produce metrics for benchmarks (Hellaswag, ARC-easy, etc.)",
+        "test_scenarios": [
+          "Multiple benchmarks",
+          "Error reporting",
+          "Performance validation"
+        ]
+      },
+      {
+        "name": "Convert to GGUF",
+        "script": "scripts/gguf_converter.py",
+        "description": "Export model to llama.cpp GGUF format",
+        "command": "python scripts/gguf_converter.py --model-path <path> --quant-type <type> --output <file>",
+        "success_criteria": "Can convert to F16, quantize to target type, produce valid GGUF file",
+        "test_scenarios": [
+          "F16 conversion",
+          "Quantization (Q4_K_M, Q5_K_M, etc.)",
+          "Error handling",
+          "File validation"
+        ]
+      },
+      {
+        "name": "Upload to Hugging Face",
+        "script": "annihilate.py (via TUI)",
+        "description": "Publish model to Hugging Face Hub",
+        "command": "TUI \u2192 Export \u2192 Upload to Hugging Face \u2192 Configure repo",
+        "success_criteria": "Can authenticate, create repository, push model files",
+        "test_scenarios": [
+          "Model upload",
+          "Token handling",
+          "Repository visibility",
+          "Access control"
+        ]
+      },
+      {
+        "name": "TUI Integration Test",
+        "script": "tui/ (Rust application)",
+        "description": "Test Terminal User Interface commands",
+        "command": "cargo run in tui/ directory",
+        "success_criteria": "All TUI workflows functional: Chat, Benchmark, Export, Results",
+        "test_scenarios": [
+          "Chat interface",
+          "Benchmark dashboard",
+          "Export workflows",
+          "Model selection"
+        ]
+      }
+    ],
+    "testing_strategy": {
+      "manual_verification": "Step-by-step TUI interaction testing",
+      "automated_commands": "Script-based tests with expected outputs",
+      "error_scenarios": "Testing error conditions and recovery",
+      "integration": "Cross-feature workflow validation"
+    },
+    "dependencies": {
+      "python": "Python 3.10+ with full project dependencies",
+      "rust": "Rust toolchain for TUI",
+      "model_checkpoint": "Valid trial checkpoints available",
+      "llama_cpp": "Required for GGUF conversion tests"
+    }
+  }
+}

@@ -18,6 +18,7 @@ use crate::parser::ParsedEvent;
 use crate::subprocess::SubprocessManager;
 use crate::sysinfo::SystemInfo;
 use crate::theme;
+use serde_json;
 
 // ─── ASCII Art Banner ──────────────────────────────────────────
 
@@ -27,6 +28,14 @@ const BANNER: &[&str] = &[
     r" ██████ █ █  █ █ █  █ ██ █████ ██ █    ██████   ██   ██ █    █ █ █  █ ",
     r" █    █ █  █ █ █  █ █ ██ █   █ ██ █    █    █   ██   ██ █    █ █  █ █ ",
     r" █    █ █   ██ █   ██ ██ █   █ ██ █████ █    █  ██   ██  ████  █   ██ ",
+];
+
+const GGUF_BANNER: &[&str] = &[
+    r"  ██████   ██████  ██    ██ ███████ ",
+    r" ██       ██       ██    ██ ██      ",
+    r" ██   ███ ██   ███ ██    ██ █████   ",
+    r" ██    ██ ██    ██ ██    ██ ██      ",
+    r"  ██████   ██████   ██████  ██      ",
 ];
 
 const TAGLINE: &str = "-- Breaking the Chains | Unleashing Model Potential --";
@@ -45,7 +54,10 @@ pub enum Screen {
     TrialActions,
     Chat,
     Export,
+    GgufSizeSelect,
+    CompletedModels,
     CheckpointPrompt,
+    BenchmarkDashboard,
     Confirm(ConfirmAction),
     About,
     RecentModels,
@@ -55,6 +67,150 @@ pub enum Screen {
 pub enum ConfirmAction {
     Quit,
     StopProcessing,
+    DeleteCheckpoint(String),
+}
+
+/// Write (or clear) `HF_TOKEN` in the repo-root `.env`, preserving every other entry.
+///
+/// The file is always at the repo root rather than the process CWD, so the value is
+/// picked up by pydantic-settings' dotenv source regardless of where the TUI was launched.
+fn persist_hf_token(token: Option<&str>) -> std::io::Result<()> {
+    let path = crate::subprocess::repo_root().join(".env");
+
+    let mut lines: Vec<String> = match std::fs::read_to_string(&path) {
+        Ok(existing) => existing
+            .lines()
+            .filter(|l| {
+                let key = l.split('=').next().unwrap_or("").trim();
+                key != "HF_TOKEN"
+            })
+            .map(str::to_string)
+            .collect(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(e),
+    };
+
+    if let Some(t) = token {
+        lines.push(format!("HF_TOKEN={t}"));
+    }
+
+    while lines.last().is_some_and(|l| l.trim().is_empty()) {
+        lines.pop();
+    }
+
+    let mut body = lines.join("\n");
+    if !body.is_empty() {
+        body.push('\n');
+    }
+    std::fs::write(&path, body)
+}
+
+/// Delete a model's checkpoint file. Returns `Ok(false)` if there was nothing to delete.
+///
+/// Errors are surfaced to the caller rather than swallowed, so the UI never claims a
+/// deletion that did not happen.
+fn delete_checkpoint(model: &str) -> std::io::Result<bool> {
+    let path = crate::subprocess::repo_root()
+        .join("checkpoints")
+        .join(format!("{}.jsonl", crate::subprocess::checkpoint_name(model)));
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// Recover the original model name for a checkpoint file.
+///
+/// The filename stem cannot be reversed: `checkpoint_name` maps `/`, `.` and `:`
+/// all onto `--`, so `Llama-3.1-8B` and `Llama-3/1-8B` collide. Instead read the
+/// model name back out of the settings record Optuna wrote into the journal, and
+/// only fall back to a best-effort de-mangling if that is unavailable.
+fn model_name_from_checkpoint(path: &std::path::Path) -> String {
+    use std::io::BufRead;
+
+    let fallback = || {
+        path.file_stem()
+            .map(|s| s.to_string_lossy().replace("--", "/"))
+            .unwrap_or_default()
+    };
+
+    // Checkpoints run to hundreds of thousands of lines, so stream rather than
+    // reading the whole journal in; the settings record is written up front.
+    let Ok(file) = std::fs::File::open(path) else {
+        return fallback();
+    };
+
+    for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+
+        // Optuna's journal stores study user attributes as op_code 2 records.
+        // The Python side puts the serialized Settings under "settings" as a
+        // JSON *string*, so it needs a second parse.
+        let model = value
+            .get("user_attr")
+            .and_then(|v| v.get("settings"))
+            .and_then(|v| v.as_str())
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .as_ref()
+            .and_then(|v| v.get("model"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        if let Some(model) = model {
+            if !model.is_empty() {
+                return model;
+            }
+        }
+    }
+
+    fallback()
+}
+
+/// Mask a secret for display, revealing at most the first 3 *characters*.
+///
+/// Byte slicing would panic on multi-byte input, so this walks chars.
+fn mask_secret(secret: &str) -> String {
+    let count = secret.chars().count();
+    if count <= 3 {
+        return "*".repeat(count);
+    }
+    let visible: String = secret.chars().take(3).collect();
+    format!("{}{}", visible, "*".repeat(count - 3))
+}
+
+/// Insert `c` at a char-cursor position, returning the new cursor.
+///
+/// `cursor` counts characters, not bytes; `String::insert` needs a byte index and
+/// panics if handed a non-boundary, so translate before inserting.
+fn insert_at_char_cursor(s: &mut String, cursor: usize, c: char) -> usize {
+    let byte_idx = s
+        .char_indices()
+        .nth(cursor)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len());
+    s.insert(byte_idx, c);
+    cursor + 1
+}
+
+/// Remove the character before a char-cursor position, returning the new cursor.
+fn remove_before_char_cursor(s: &mut String, cursor: usize) -> usize {
+    if cursor == 0 {
+        return 0;
+    }
+    if let Some((byte_idx, _)) = s.char_indices().nth(cursor - 1) {
+        s.remove(byte_idx);
+        cursor - 1
+    } else {
+        cursor
+    }
+}
+
+/// Number of characters (not bytes) in `s`.
+fn char_len(s: &str) -> usize {
+    s.chars().count()
 }
 
 // ─── Menu System ───────────────────────────────────────────────
@@ -144,6 +300,12 @@ pub struct App {
     pub chat_messages: Vec<(String, String)>, // (role, content)
     pub chat_input: String,
     pub chat_scroll: usize,
+    pub chat_subprocess: Option<SubprocessManager>,
+    pub chat_loading: bool,
+    pub chat_streaming: bool,
+    pub benchmark_subprocess: Option<SubprocessManager>,
+    pub benchmark_running: bool,
+    pub benchmark_results: Vec<(String, String, String)>, // (benchmark, metric, value)
 
     // Status
     pub status_message: String,
@@ -151,6 +313,7 @@ pub struct App {
     pub plot_residuals: bool,
     pub quantize: bool,
     pub use_obliteratus: bool,
+    pub gguf_size: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -167,6 +330,7 @@ impl App {
         let splash_menu = vec![
             MenuItem::new("Start Decensoring", "Launch the annihilation workflow")
                 .with_key("Enter"),
+            MenuItem::new("Completed Models", "Export finished models to GGUF").with_key("M"),
             MenuItem::new("Configuration", "Edit settings before running").with_key("C"),
             MenuItem::new("About", "View project information").with_key("A"),
             MenuItem::new("Quit", "Exit the application").with_key("Q"),
@@ -187,7 +351,7 @@ impl App {
             model_cursor: 0,
             model_error: None,
             hf_token_input: std::env::var("HF_TOKEN").unwrap_or_default(),
-            hf_token_cursor: std::env::var("HF_TOKEN").unwrap_or_default().len(),
+            hf_token_cursor: char_len(&std::env::var("HF_TOKEN").unwrap_or_default()),
             is_processing: false,
             is_setting_up: false,
             subprocess: None,
@@ -211,11 +375,18 @@ impl App {
             chat_messages: Vec::new(),
             chat_input: String::new(),
             chat_scroll: 0,
+            chat_subprocess: None,
+            chat_loading: false,
+            chat_streaming: false,
+            benchmark_subprocess: None,
+            benchmark_running: false,
+            benchmark_results: Vec::new(),
             status_message: "Ready".to_string(),
             annihilate_available: false,
             plot_residuals: false,
             quantize: false,
-            use_obliteratus: true,
+            use_obliteratus: false,
+            gguf_size: "Q4_K_M".to_string(),
         }
     }
 
@@ -436,6 +607,146 @@ impl App {
                 self.elapsed_secs += 1; // Roughly 1 second elapsed (at 30fps)
             }
         }
+
+        // Poll chat subprocess for streamed tokens
+        if let Some(ref mut chat_proc) = self.chat_subprocess {
+            use crate::subprocess::SubprocessMessage;
+            let msgs = chat_proc.poll_messages();
+            for msg in msgs {
+                match msg {
+                    SubprocessMessage::Event(event) => {
+                        if let ParsedEvent::Raw(line) = event {
+                            // Parse JSON messages from chat_server.py
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                                match json.get("type").and_then(|t| t.as_str()) {
+                                    Some("ready") => {
+                                        self.chat_loading = false;
+                                        self.status_message = "Chat ready.".to_string();
+                                        self.chat_messages.push((
+                                            "system".to_string(),
+                                            "Model loaded! Type a message and press Enter.".to_string(),
+                                        ));
+                                    }
+                                    Some("status") => {
+                                        if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
+                                            self.status_message = content.to_string();
+                                            self.chat_messages.push((
+                                                "system".to_string(),
+                                                content.to_string(),
+                                            ));
+                                        }
+                                    }
+                                    Some("token") => {
+                                        if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
+                                            // Append token to the last assistant message, or create one
+                                            if let Some(last) = self.chat_messages.last_mut() {
+                                                if last.0 == "assistant" {
+                                                    last.1.push_str(content);
+                                                } else {
+                                                    self.chat_messages.push(("assistant".to_string(), content.to_string()));
+                                                }
+                                            } else {
+                                                self.chat_messages.push(("assistant".to_string(), content.to_string()));
+                                            }
+                                            self.chat_streaming = true;
+                                        }
+                                    }
+                                    Some("done") => {
+                                        self.chat_streaming = false;
+                                    }
+                                    Some("error") => {
+                                        if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
+                                            self.chat_messages.push((
+                                                "system".to_string(),
+                                                format!("Error: {}", content),
+                                            ));
+                                            self.status_message = "Chat error.".to_string();
+                                        }
+                                        self.chat_loading = false;
+                                        self.chat_streaming = false;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                    SubprocessMessage::Exited(_) => {
+                        self.chat_subprocess = None;
+                        self.chat_loading = false;
+                        self.chat_streaming = false;
+                        self.status_message = "Chat server disconnected.".to_string();
+                        self.chat_messages.push((
+                            "system".to_string(),
+                            "Chat server disconnected.".to_string(),
+                        ));
+                    }
+                    SubprocessMessage::SpawnError(err) => {
+                        self.chat_loading = false;
+                        self.chat_streaming = false;
+                        self.status_message = format!("Failed to start chat: {}", err);
+                        self.chat_messages.push((
+                            "system".to_string(),
+                            format!("Failed to start chat: {}", err),
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Poll benchmark subprocess
+        if let Some(ref mut bench_proc) = self.benchmark_subprocess {
+            use crate::subprocess::SubprocessMessage;
+            let msgs = bench_proc.poll_messages();
+            for msg in msgs {
+                match msg {
+                    SubprocessMessage::Event(event) => {
+                        if let ParsedEvent::Raw(line) = event {
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                                match json.get("type").and_then(|t| t.as_str()) {
+                                    Some("result") => {
+                                        let bench = json.get("benchmark").and_then(|b| b.as_str()).unwrap_or("unknown").to_string();
+                                        let metric = json.get("metric").and_then(|m| m.as_str()).unwrap_or("").to_string();
+                                        let value = json.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                        self.benchmark_results.push((bench, metric, value));
+                                    }
+                                    Some("status") => {
+                                        if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
+                                            self.status_message = content.to_string();
+                                            self.log_lines.push((content.to_string(), LogLevel::Info));
+                                        }
+                                    }
+                                    Some("done") => {
+                                        self.benchmark_running = false;
+                                        self.status_message = "Benchmarks completed.".to_string();
+                                        if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
+                                            self.log_lines.push((content.to_string(), LogLevel::Success));
+                                        }
+                                    }
+                                    Some("error") => {
+                                        if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
+                                            self.log_lines.push((format!("Benchmark error: {}", content), LogLevel::Error));
+                                            self.status_message = "Benchmark failed.".to_string();
+                                        }
+                                        self.benchmark_running = false;
+                                    }
+                                    _ => {}
+                                }
+                            } else if !line.trim().is_empty() {
+                                self.log_lines.push((line, LogLevel::Dim));
+                            }
+                        }
+                    }
+                    SubprocessMessage::Exited(_) => {
+                        self.benchmark_subprocess = None;
+                        self.benchmark_running = false;
+                    }
+                    SubprocessMessage::SpawnError(err) => {
+                        self.benchmark_running = false;
+                        self.log_lines.push((format!("Benchmark error: {}", err), LogLevel::Error));
+                    }
+                }
+            }
+        }
     }
 
     fn generate_demo_results(&mut self) {
@@ -512,7 +823,10 @@ impl App {
             Screen::Results => self.handle_results_key(key),
             Screen::TrialActions => self.handle_trial_actions_key(key),
             Screen::Chat => self.handle_chat_key(key),
+            Screen::BenchmarkDashboard => self.handle_benchmark_dashboard_key(key),
             Screen::Export => self.handle_export_key(key),
+            Screen::CompletedModels => self.handle_completed_models_key(key),
+            Screen::GgufSizeSelect => self.handle_gguf_size_select_key(key),
             Screen::CheckpointPrompt => self.handle_checkpoint_prompt_key(key),
             Screen::Confirm(action) => self.handle_confirm_key(key, action.clone()),
             Screen::About => self.handle_about_key(key),
@@ -571,6 +885,32 @@ impl App {
                         self.menu_state.select(Some(0));
                     }
                     Some(1) => {
+                        // Completed Models
+                        let checkpoint_dir = crate::subprocess::get_repo_root().join("checkpoints");
+                        let mut models = Vec::new();
+                        if let Ok(entries) = std::fs::read_dir(checkpoint_dir) {
+                            for entry in entries.filter_map(|e| e.ok()) {
+                                if let Some(ext) = entry.path().extension() {
+                                    if ext == "jsonl" {
+                                        models.push(model_name_from_checkpoint(&entry.path()));
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if models.is_empty() {
+                            self.status_message = "No completed models found.".to_string();
+                        } else {
+                            self.screen = Screen::CompletedModels;
+                            self.current_menu = models
+                                .into_iter()
+                                .map(|m| MenuItem::new(&m, "Select to convert to GGUF"))
+                                .collect();
+                            self.current_menu.push(MenuItem::new("Back", "Return to main menu").with_key("Esc"));
+                            self.menu_state.select(Some(0));
+                        }
+                    }
+                    Some(2) => {
                         // Config
                         self.screen = Screen::ConfigSelect;
                         self.current_menu = vec![
@@ -590,14 +930,45 @@ impl App {
                         ];
                         self.menu_state.select(Some(0));
                     }
-                    Some(2) => {
+                    Some(3) => {
                         self.screen = Screen::About;
                     }
-                    Some(3) => self.should_quit = true, // Quit
+                    Some(4) => self.should_quit = true, // Quit
                     _ => {}
                 }
             }
             KeyCode::Char('q') | KeyCode::Char('Q') => self.should_quit = true,
+            _ => {}
+        }
+    }
+
+    // ─── Completed Models Keys ─────────────────────────────────
+
+    fn handle_completed_models_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => self.menu_up(),
+            KeyCode::Down | KeyCode::Char('j') => self.menu_down(),
+            KeyCode::Enter => {
+                let idx = self.menu_state.selected().unwrap_or(0);
+                if idx < self.current_menu.len().saturating_sub(1) {
+                    // Selected a model
+                    self.model_input = self.current_menu[idx].label.clone();
+                    self.screen = Screen::TrialActions;
+                    self.current_menu = vec![
+                        MenuItem::new("Chat with Model", "Test the decensored model").with_key("C"),
+                        MenuItem::new("Run Benchmarks", "Evaluate with MMLU, GSM8K, etc.").with_key("B"),
+                        MenuItem::new("Convert to GGUF", "Export as a quantized GGUF file").with_key("G"),
+                        MenuItem::new("Upload to Hugging Face", "Push model to HF Hub").with_key("U"),
+                        MenuItem::new("Delete Model", "Remove the checkpoint").with_key("D"),
+                        MenuItem::new("Back", "Return to Completed Models").with_key("Esc"),
+                    ];
+                    self.menu_state.select(Some(0));
+                } else {
+                    // Back
+                    self.go_back_to_splash();
+                }
+            }
+            KeyCode::Esc => self.go_back_to_splash(),
             _ => {}
         }
     }
@@ -699,15 +1070,11 @@ impl App {
             }
             KeyCode::Char(c) => {
                 self.model_error = None;
-                self.model_input.insert(self.model_cursor, c);
-                self.model_cursor += 1;
+                self.model_cursor = insert_at_char_cursor(&mut self.model_input, self.model_cursor, c);
             }
             KeyCode::Backspace => {
                 self.model_error = None;
-                if self.model_cursor > 0 {
-                    self.model_cursor -= 1;
-                    self.model_input.remove(self.model_cursor);
-                }
+                self.model_cursor = remove_before_char_cursor(&mut self.model_input, self.model_cursor);
             }
             KeyCode::Left => {
                 if self.model_cursor > 0 {
@@ -715,12 +1082,12 @@ impl App {
                 }
             }
             KeyCode::Right => {
-                if self.model_cursor < self.model_input.len() {
+                if self.model_cursor < char_len(&self.model_input) {
                     self.model_cursor += 1;
                 }
             }
             KeyCode::Home => self.model_cursor = 0,
-            KeyCode::End => self.model_cursor = self.model_input.len(),
+            KeyCode::End => self.model_cursor = char_len(&self.model_input),
             _ => {}
         }
     }
@@ -764,13 +1131,11 @@ impl App {
         if self.screen == Screen::ModelInput {
             self.model_error = None;
             for c in clean.chars() {
-                self.model_input.insert(self.model_cursor, c);
-                self.model_cursor += 1;
+                self.model_cursor = insert_at_char_cursor(&mut self.model_input, self.model_cursor, c);
             }
         } else if self.screen == Screen::TokenInput {
             for c in clean.chars() {
-                self.hf_token_input.insert(self.hf_token_cursor, c);
-                self.hf_token_cursor += 1;
+                self.hf_token_cursor = insert_at_char_cursor(&mut self.hf_token_input, self.hf_token_cursor, c);
             }
         }
     }
@@ -810,8 +1175,12 @@ impl App {
                     }
                     Some(5) => {
                         self.screen = Screen::TokenInput;
-                        self.hf_token_cursor = self.hf_token_input.len();
+                        self.hf_token_cursor = char_len(&self.hf_token_input);
                         return; // Don't go back to splash
+                    }
+                    Some(6) => {
+                        self.go_back_to_splash();
+                        return;
                     }
                     _ => {}
                 }
@@ -838,8 +1207,7 @@ impl App {
                     if let Ok(text) = clipboard.get_text() {
                         let clean = text.replace('\n', "").replace('\r', "");
                         for c in clean.chars() {
-                            self.hf_token_input.insert(self.hf_token_cursor, c);
-                            self.hf_token_cursor += 1;
+                            self.hf_token_cursor = insert_at_char_cursor(&mut self.hf_token_input, self.hf_token_cursor, c);
                         }
                     }
                 }
@@ -849,27 +1217,27 @@ impl App {
                     if let Ok(text) = clipboard.get_text() {
                         let clean = text.replace('\n', "").replace('\r', "");
                         for c in clean.chars() {
-                            self.hf_token_input.insert(self.hf_token_cursor, c);
-                            self.hf_token_cursor += 1;
+                            self.hf_token_cursor = insert_at_char_cursor(&mut self.hf_token_input, self.hf_token_cursor, c);
                         }
                     }
                 }
             }
             KeyCode::Enter => {
                 let token = self.hf_token_input.trim().to_string();
-                if !token.is_empty() {
-                    unsafe {
-                        std::env::set_var("HF_TOKEN", &token);
+                let token_opt = if token.is_empty() { None } else { Some(token.as_str()) };
+                unsafe {
+                    match token_opt {
+                        Some(t) => std::env::set_var("HF_TOKEN", t),
+                        None => std::env::remove_var("HF_TOKEN"),
                     }
-                    let _ = std::fs::write(".env", format!("HF_TOKEN={}", token));
-                    self.status_message = "HuggingFace token saved successfully.".to_string();
-                } else {
-                    unsafe {
-                        std::env::remove_var("HF_TOKEN");
-                    }
-                    let _ = std::fs::write(".env", "");
-                    self.status_message = "HuggingFace token cleared.".to_string();
                 }
+                self.status_message = match persist_hf_token(token_opt) {
+                    Ok(()) if token_opt.is_some() => {
+                        "HuggingFace token saved to .env (gitignored).".to_string()
+                    }
+                    Ok(()) => "HuggingFace token cleared.".to_string(),
+                    Err(e) => format!("Token set for this session, but .env write failed: {e}"),
+                };
                 
                 // Go back to config select
                 self.screen = Screen::ConfigSelect;
@@ -910,14 +1278,10 @@ impl App {
                 self.menu_state.select(Some(5));
             }
             KeyCode::Char(c) => {
-                self.hf_token_input.insert(self.hf_token_cursor, c);
-                self.hf_token_cursor += 1;
+                self.hf_token_cursor = insert_at_char_cursor(&mut self.hf_token_input, self.hf_token_cursor, c);
             }
             KeyCode::Backspace => {
-                if self.hf_token_cursor > 0 {
-                    self.hf_token_cursor -= 1;
-                    self.hf_token_input.remove(self.hf_token_cursor);
-                }
+                self.hf_token_cursor = remove_before_char_cursor(&mut self.hf_token_input, self.hf_token_cursor);
             }
             KeyCode::Left => {
                 if self.hf_token_cursor > 0 {
@@ -925,12 +1289,12 @@ impl App {
                 }
             }
             KeyCode::Right => {
-                if self.hf_token_cursor < self.hf_token_input.len() {
+                if self.hf_token_cursor < char_len(&self.hf_token_input) {
                     self.hf_token_cursor += 1;
                 }
             }
             KeyCode::Home => self.hf_token_cursor = 0,
-            KeyCode::End => self.hf_token_cursor = self.hf_token_input.len(),
+            KeyCode::End => self.hf_token_cursor = char_len(&self.hf_token_input),
             _ => {}
         }
     }
@@ -1021,40 +1385,89 @@ impl App {
             KeyCode::Up | KeyCode::Char('k') => self.menu_up(),
             KeyCode::Down | KeyCode::Char('j') => self.menu_down(),
             KeyCode::Enter => {
-                match self.menu_state.selected() {
-                    Some(0) => {
-                        // Save locally
-                        self.screen = Screen::Export;
-                        self.current_menu = vec![
-                            MenuItem::new("Merge and export full model", "Requires sufficient RAM"),
-                            MenuItem::new(
-                                "Export adapter only",
-                                "Can be merged later, smaller file",
-                            ),
-                            MenuItem::new("Back", "Return to actions menu").with_key("Esc"),
-                        ];
-                        self.menu_state.select(Some(0));
-                    }
-                    Some(1) => { /* Upload - would need HF token input */ }
-                    Some(2) => {
-                        // Chat
-                        self.screen = Screen::Chat;
-                        self.chat_messages.clear();
-                        self.chat_input.clear();
-                        self.chat_messages.push((
-                            "system".to_string(),
-                            "Chat mode active. Type a message and press Enter.".to_string(),
-                        ));
-                    }
-                    Some(3) => { /* Benchmarks */ }
-                    Some(4) => { /* More trials */ }
-                    _ => {
-                        self.switch_to_results();
+                if let Some(idx) = self.menu_state.selected() {
+                    let label = self.current_menu[idx].label.clone();
+                    match label.as_str() {
+                        "Save Model Locally" => {
+                            self.screen = Screen::Export;
+                            self.current_menu = vec![
+                                MenuItem::new("Merge and export full model", "Requires sufficient RAM"),
+                                MenuItem::new(
+                                    "Export adapter only",
+                                    "Can be merged later, smaller file",
+                                ),
+                                MenuItem::new("Convert to GGUF", "Export as a quantized GGUF file"),
+                                MenuItem::new("Back", "Return to actions menu").with_key("Esc"),
+                            ];
+                            self.menu_state.select(Some(0));
+                        }
+                        "Upload to Hugging Face" => {
+                            self.screen = Screen::TokenInput;
+                            self.status_message = "Enter your Hugging Face token to upload the model.".to_string();
+                        }
+                        "Chat with Model" => {
+                            self.screen = Screen::Chat;
+                            self.chat_messages.clear();
+                            self.chat_input.clear();
+                            self.chat_loading = true;
+                            self.chat_streaming = false;
+                            self.status_message = "Starting chat server...".to_string();
+                            self.chat_messages.push((
+                                "system".to_string(),
+                                "Starting chat server... Reconstructing annihilated model from checkpoint.".to_string(),
+                            ));
+                            self.chat_subprocess = Some(SubprocessManager::spawn_chat_server(&self.model_input));
+                        }
+                        "Run Benchmarks" => {
+                            self.screen = Screen::BenchmarkDashboard;
+                            self.benchmark_running = true;
+                            self.benchmark_results.clear();
+                            self.log_lines.clear();
+                            self.log_lines.push(("Starting benchmarks on annihilated model...".to_string(), LogLevel::Info));
+                            self.benchmark_subprocess = Some(SubprocessManager::spawn_benchmark(&self.model_input));
+                            self.status_message = "Running benchmarks... This may take a while.".to_string();
+                        }
+                        "Run More Trials" => { /* More trials */ }
+                        "Convert to GGUF" => {
+                            self.screen = Screen::GgufSizeSelect;
+                            self.current_menu = vec![
+                                MenuItem::new("Q4_K_M", "Good balance of quality and size (recommended)"),
+                                MenuItem::new("Q8_0", "Near-perfect quality, larger size"),
+                                MenuItem::new("F16", "Unquantized, maximum quality"),
+                                MenuItem::new("Back", "Return to export options").with_key("Esc"),
+                            ];
+                            self.menu_state.select(Some(0));
+                        }
+                        "Delete Model" => {
+                            // Destructive: confirm before removing the study.
+                            let model = self.model_input.clone();
+                            self.screen = Screen::Confirm(ConfirmAction::DeleteCheckpoint(model));
+                            self.current_menu = vec![
+                                MenuItem::new("Delete", "Permanently remove this checkpoint")
+                                    .with_key("Y"),
+                                MenuItem::new("Cancel", "Keep the checkpoint").with_key("Esc"),
+                            ];
+                            self.menu_state.select(Some(1)); // Default to Cancel
+                        }
+                        "Back to Results" => {
+                            self.switch_to_results();
+                        }
+                        "Back" => {
+                            self.go_back_to_splash();
+                        }
+                        _ => {
+                            self.go_back_to_splash();
+                        }
                     }
                 }
             }
             KeyCode::Esc => {
-                self.switch_to_results();
+                // Determine context-aware escape:
+                if self.current_menu.iter().any(|m| m.label == "Back to Results") {
+                    self.switch_to_results();
+                } else {
+                    self.go_back_to_splash();
+                }
             }
             _ => {}
         }
@@ -1065,22 +1478,79 @@ impl App {
     fn handle_chat_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter => {
-                if !self.chat_input.is_empty() {
+                if !self.chat_input.is_empty() && !self.chat_loading && !self.chat_streaming {
                     let msg = self.chat_input.clone();
-                    self.chat_messages.push(("user".to_string(), msg));
-                    self.chat_messages.push(("assistant".to_string(), "This is a demo response. In the full version, this will stream from the decensored model.".to_string()));
+                    self.chat_messages.push(("user".to_string(), msg.clone()));
                     self.chat_input.clear();
+
+                    let chat_history: Vec<serde_json::Value> = self.chat_messages.iter()
+                        .filter(|(role, _)| role == "user" || role == "assistant")
+                        .map(|(role, content)| {
+                            serde_json::json!({"role": role, "content": content})
+                        })
+                        .collect();
+
+                    let mut full_chat = vec![serde_json::json!({"role": "system", "content": "You are a helpful assistant."})]; 
+                    full_chat.extend(chat_history);
+
+                    if let Some(ref proc) = self.chat_subprocess {
+                        let json_str = serde_json::to_string(&full_chat).unwrap_or_default();
+                        if proc.send_input(&json_str) {
+                            self.chat_streaming = true;
+                        } else {
+                            self.chat_messages.push((
+                                "system".to_string(),
+                                "Failed to send message to chat server.".to_string(),
+                            ));
+                        }
+                    } else {
+                        self.chat_messages.push(("system".to_string(), "Chat server not running. Press Esc and try again.".to_string()));
+                    }
                 }
             }
             KeyCode::Char(c) => {
-                self.chat_input.push(c);
+                if !self.chat_loading {
+                    self.chat_input.push(c);
+                }
             }
             KeyCode::Backspace => {
                 self.chat_input.pop();
             }
             KeyCode::Esc => {
+                if let Some(ref mut proc) = self.chat_subprocess {
+                    proc.kill();
+                }
+                self.chat_subprocess = None;
+                self.chat_loading = false;
+                self.chat_streaming = false;
                 self.screen = Screen::TrialActions;
                 self.menu_state.select(Some(2));
+            }
+            _ => {}
+        }
+    }
+
+    // ─── Benchmark Dashboard Keys ──────────────────────────────
+
+    fn handle_benchmark_dashboard_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                if let Some(ref mut proc) = self.benchmark_subprocess {
+                    proc.kill();
+                }
+                self.benchmark_subprocess = None;
+                self.benchmark_running = false;
+                self.screen = Screen::TrialActions;
+                self.menu_state.select(Some(1)); // Usually benchmark is index 1
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.log_scroll > 0 {
+                    self.log_scroll -= 1;
+                    self.log_auto_scroll = false;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.log_scroll += 1;
             }
             _ => {}
         }
@@ -1098,6 +1568,16 @@ impl App {
                     self.screen = Screen::TrialActions;
                     self.menu_state.select(Some(0));
                 }
+                Some(2) => {
+                    self.screen = Screen::GgufSizeSelect;
+                    self.current_menu = vec![
+                        MenuItem::new("Q4_K_M", "Good balance of quality and size (recommended)"),
+                        MenuItem::new("Q8_0", "Near-perfect quality, larger size"),
+                        MenuItem::new("F16", "Unquantized, maximum quality"),
+                        MenuItem::new("Back", "Return to export options").with_key("Esc"),
+                    ];
+                    self.menu_state.select(Some(0));
+                }
                 _ => {
                     self.screen = Screen::TrialActions;
                     self.menu_state.select(Some(0));
@@ -1111,40 +1591,88 @@ impl App {
         }
     }
 
-    // ─── Confirm Dialog Keys ───────────────────────────────────
+    // ─── GGUF Size Select Keys ─────────────────────────────────
 
-    fn handle_confirm_key(&mut self, key: KeyEvent, action: ConfirmAction) {
+    fn handle_gguf_size_select_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => self.menu_up(),
             KeyCode::Down | KeyCode::Char('j') => self.menu_down(),
-            KeyCode::Enter => match (self.menu_state.selected(), &action) {
-                (Some(0), ConfirmAction::Quit) => self.should_quit = true,
-                (Some(0), ConfirmAction::StopProcessing) => {
-                    self.is_processing = false;
-                    if !self.trials.is_empty() || self.current_trial > 0 {
-                        self.generate_demo_results();
-                        self.switch_to_results();
-                    } else {
+            KeyCode::Enter => {
+                match self.menu_state.selected() {
+                    Some(0) => self.gguf_size = "Q4_K_M".to_string(),
+                    Some(1) => self.gguf_size = "Q8_0".to_string(),
+                    Some(2) => self.gguf_size = "f16".to_string(),
+                    _ => {
                         self.go_back_to_splash();
+                        return;
                     }
                 }
-                _ => {
-                    self.screen = Screen::Processing;
-                }
-            },
-            KeyCode::Esc | KeyCode::Char('n') => match action {
-                ConfirmAction::StopProcessing => self.screen = Screen::Processing,
-                ConfirmAction::Quit => self.go_back_to_splash(),
-            },
-            KeyCode::Char('y') => match action {
-                ConfirmAction::Quit => self.should_quit = true,
-                ConfirmAction::StopProcessing => {
-                    self.is_processing = false;
+                
+                self.is_processing = true;
+                self.log_lines.clear();
+                let msg = format!("Starting GGUF conversion (Size: {})...", self.gguf_size);
+                self.log_lines.push((msg, LogLevel::Info));
+                self.screen = Screen::Processing;
+                
+                // Spawn the subprocess using the gguf converter script
+                // We'll pass the model input name for now as a placeholder
+                self.subprocess = Some(crate::subprocess::SubprocessManager::spawn_gguf_convert(
+                    &self.model_input,
+                    &self.gguf_size,
+                ));
+            }
+            KeyCode::Esc => {
+                self.go_back_to_splash();
+            }
+            _ => {}
+        }
+    }
+
+    // ─── Confirm Dialog Keys ───────────────────────────────────
+
+    fn handle_confirm_key(&mut self, key: KeyEvent, action: ConfirmAction) {
+        let confirmed = match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.menu_up();
+                return;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.menu_down();
+                return;
+            }
+            KeyCode::Enter => self.menu_state.selected() == Some(0),
+            KeyCode::Char('y') => true,
+            KeyCode::Esc | KeyCode::Char('n') => false,
+            _ => return,
+        };
+
+        match (confirmed, action) {
+            (true, ConfirmAction::Quit) => self.should_quit = true,
+            (false, ConfirmAction::Quit) => self.go_back_to_splash(),
+
+            (true, ConfirmAction::StopProcessing) => {
+                self.is_processing = false;
+                if !self.trials.is_empty() || self.current_trial > 0 {
                     self.generate_demo_results();
                     self.switch_to_results();
+                } else {
+                    self.go_back_to_splash();
                 }
-            },
-            _ => {}
+            }
+            (false, ConfirmAction::StopProcessing) => self.screen = Screen::Processing,
+
+            (true, ConfirmAction::DeleteCheckpoint(model)) => {
+                self.status_message = match delete_checkpoint(&model) {
+                    Ok(true) => format!("Deleted checkpoint for {model}"),
+                    Ok(false) => format!("No checkpoint found for {model}"),
+                    Err(e) => format!("Could not delete checkpoint for {model}: {e}"),
+                };
+                self.go_back_to_splash();
+            }
+            (false, ConfirmAction::DeleteCheckpoint(_)) => {
+                self.status_message = "Deletion cancelled.".to_string();
+                self.switch_to_results();
+            }
         }
     }
 
@@ -1227,6 +1755,7 @@ impl App {
         self.current_menu = vec![
             MenuItem::new("Start Decensoring", "Launch the annihilation workflow")
                 .with_key("Enter"),
+            MenuItem::new("Completed Models", "Export finished models to GGUF").with_key("M"),
             MenuItem::new("Configuration", "Edit settings before running").with_key("C"),
             MenuItem::new("About", "View project information").with_key("A"),
             MenuItem::new("Quit", "Exit the application").with_key("Q"),
@@ -1278,20 +1807,10 @@ impl App {
     fn check_and_start_processing(&mut self) {
         let checkpoint_dir = crate::subprocess::get_repo_root().join("checkpoints");
 
-        // Sanitize model name exactly like python backend does
-        let sanitized_model: String = self
-            .model_input
-            .chars()
-            .map(|c| {
-                if c.is_alphanumeric() || c == '_' || c == '-' {
-                    c.to_string()
-                } else {
-                    "--".to_string()
-                }
-            })
-            .collect();
-
-        let checkpoint_file = checkpoint_dir.join(format!("{}.jsonl", sanitized_model));
+        let checkpoint_file = checkpoint_dir.join(format!(
+            "{}.jsonl",
+            crate::subprocess::checkpoint_name(&self.model_input)
+        ));
 
         if checkpoint_file.exists() {
             self.screen = Screen::CheckpointPrompt;
@@ -1321,20 +1840,12 @@ impl App {
                     }
                     Some(1) => {
                         // Start fresh
-                        let sanitized_model: String = self
-                            .model_input
-                            .chars()
-                            .map(|c| {
-                                if c.is_alphanumeric() || c == '_' || c == '-' {
-                                    c.to_string()
-                                } else {
-                                    "--".to_string()
-                                }
-                            })
-                            .collect();
                         let checkpoint_file = crate::subprocess::get_repo_root()
                             .join("checkpoints")
-                            .join(format!("{}.jsonl", sanitized_model));
+                            .join(format!(
+                                "{}.jsonl",
+                                crate::subprocess::checkpoint_name(&self.model_input)
+                            ));
 
                         if checkpoint_file.exists() {
                             let _ = std::fs::remove_file(checkpoint_file);
@@ -1391,8 +1902,12 @@ impl App {
                 "What do you want to do with the decensored model?",
             ),
             Screen::Chat => self.render_chat(frame, area),
+            Screen::BenchmarkDashboard => self.render_benchmark_dashboard(frame, area),
             Screen::Export => {
                 self.render_menu_screen(frame, area, "EXPORT MODEL", "Choose export strategy:")
+            }
+            Screen::GgufSizeSelect => {
+                self.render_gguf_splash(frame, area)
             }
             Screen::CheckpointPrompt => {
                 self.render_menu_screen(
@@ -1403,6 +1918,7 @@ impl App {
                 );
                 self.render_checkpoint_prompt_dialog(frame, area);
             }
+            Screen::CompletedModels => self.render_gguf_splash(frame, area),
             Screen::RecentModels => self.render_menu_screen(
                 frame,
                 area,
@@ -1414,6 +1930,7 @@ impl App {
                 match action {
                     ConfirmAction::StopProcessing => self.render_processing(frame, area),
                     ConfirmAction::Quit => self.render_splash(frame, area),
+                    ConfirmAction::DeleteCheckpoint(_) => self.render_results(frame, area),
                 }
                 self.render_confirm_dialog(frame, area);
             }
@@ -1501,6 +2018,80 @@ impl App {
         frame.render_widget(tagline, chunks[2]);
 
         // Menu
+        self.render_selection_menu(frame, chunks[4]);
+    }
+
+    fn render_gguf_splash(&mut self, frame: &mut Frame, area: Rect) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(2), // top padding
+                Constraint::Length(7), // banner
+                Constraint::Length(2), // tagline
+                Constraint::Length(1), // spacer
+                Constraint::Min(6),    // menu
+                Constraint::Length(1), // status bar
+            ])
+            .split(area);
+
+        // Banner with per-character horizontal neon gradient
+        let banner_width = GGUF_BANNER.iter().map(|l| l.len()).max().unwrap_or(0);
+
+        let banner_lines: Vec<Line> = GGUF_BANNER
+            .iter()
+            .map(|line| {
+                let chars: Vec<char> = line.chars().collect();
+                let spans: Vec<Span> = chars
+                    .iter()
+                    .enumerate()
+                    .map(|(col, &ch)| {
+                        let t = if banner_width > 1 {
+                            col as f64 / (banner_width - 1) as f64
+                        } else {
+                            0.0
+                        };
+
+                        // Gradient: green/yellow for GGUF
+                        let (r, g, b) = if t < 0.5 {
+                            let s = t * 2.0;
+                            ((50.0 + s * 200.0) as u8, 255u8, 50u8)
+                        } else {
+                            let s = (t - 0.5) * 2.0;
+                            (255u8, (255.0 - s * 100.0) as u8, 50u8)
+                        };
+
+                        let color = ratatui::style::Color::Rgb(r, g, b);
+
+                        if ch != ' ' {
+                            Span::styled(
+                                ch.to_string(),
+                                Style::default().fg(color).add_modifier(Modifier::BOLD),
+                            )
+                        } else {
+                            Span::raw(" ")
+                        }
+                    })
+                    .collect();
+                Line::from(spans)
+            })
+            .collect();
+
+        let banner = Paragraph::new(banner_lines).alignment(Alignment::Center);
+        frame.render_widget(banner, chunks[1]);
+
+        // Tagline
+        let glow_intensity = (self.glow_phase * 255.0) as u8;
+        let tagline_color = ratatui::style::Color::Rgb(200, 255, glow_intensity.max(100));
+        let tagline = Paragraph::new(Line::from(Span::styled(
+            "-- Export your models to high-performance quantized GGUF format --",
+            Style::default()
+                .fg(tagline_color)
+                .add_modifier(Modifier::ITALIC),
+        )))
+        .alignment(Alignment::Center);
+        frame.render_widget(tagline, chunks[2]);
+
+        // Menu (without settings box)
         self.render_selection_menu(frame, chunks[4]);
     }
 
@@ -1647,6 +2238,74 @@ impl App {
         }
     }
 
+    fn render_settings_panel(&self, frame: &mut Frame, area: Rect, centered: bool) {
+        let settings_area = if centered {
+            centered_rect_fixed(
+                35.min(area.width.saturating_sub(4)),
+                14, // height
+                area,
+            )
+        } else {
+            area
+        };
+
+        let lines = vec![
+            Line::from(vec![
+                Span::styled("Trials: ", Style::default().fg(theme::TEXT_DIM)),
+                Span::styled(
+                    format!("{}", self.total_trials),
+                    Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Quantization: ", Style::default().fg(theme::TEXT_DIM)),
+                Span::styled(
+                    if self.quantize { "4-bit (bnb)" } else { "None" },
+                    Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("OBLITERATUS: ", Style::default().fg(theme::TEXT_DIM)),
+                Span::styled(
+                    if self.use_obliteratus { "Enabled" } else { "Disabled" },
+                    Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Target GGUF: ", Style::default().fg(theme::TEXT_DIM)),
+                Span::styled(
+                    &self.gguf_size,
+                    Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Model: ", Style::default().fg(theme::TEXT_DIM)),
+                Span::styled(
+                    if self.model_input.is_empty() { "Not selected" } else { &self.model_input },
+                    Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD),
+                ),
+            ]),
+        ];
+
+        let panel = Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                    .title(Span::styled(
+                        " Current Settings ",
+                        Style::default().fg(theme::TEXT_DIM),
+                    ))
+                    .title_alignment(Alignment::Center)
+                    .style(Style::default().bg(theme::BG_SURFACE)),
+            )
+            .wrap(ratatui::widgets::Wrap { trim: true });
+
+        frame.render_widget(panel, settings_area);
+    }
+
     // ─── Model Input Screen ────────────────────────────────────
 
     fn render_model_input(&self, frame: &mut Frame, area: Rect) {
@@ -1783,14 +2442,8 @@ impl App {
         let display_text = if self.hf_token_input.is_empty() {
             "e.g. hf_AbcDefGhiJklMnoPqrStuVwxYz...".to_string()
         } else {
-            // Mask all but first 3 chars
-            if self.hf_token_input.len() > 3 {
-                let visible = &self.hf_token_input[0..3];
-                let hidden = "*".repeat(self.hf_token_input.len() - 3);
-                format!("{}{}", visible, hidden)
-            } else {
-                "*".repeat(self.hf_token_input.len())
-            }
+            // Mask all but the first 3 characters.
+            mask_secret(&self.hf_token_input)
         };
 
         let input_style = if self.hf_token_input.is_empty() {
@@ -1888,7 +2541,8 @@ impl App {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(10), // system info
-                Constraint::Min(5),     // controls
+                Constraint::Length(8),  // controls
+                Constraint::Min(10),    // settings
             ])
             .split(main_chunks[1]);
 
@@ -2169,6 +2823,9 @@ impl App {
 
         let ctrl_text = Paragraph::new(ctrl_lines);
         frame.render_widget(ctrl_text, ctrl_inner);
+
+        // ── Settings ──
+        self.render_settings_panel(frame, right_chunks[2], false);
     }
 
     // ─── Results Screen ────────────────────────────────────────
@@ -2295,6 +2952,117 @@ impl App {
         frame.render_widget(hints, chunks[3]);
     }
 
+    // ─── Benchmark Dashboard Screen ────────────────────────────
+
+    fn render_benchmark_dashboard(&mut self, frame: &mut Frame, area: Rect) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // title
+                Constraint::Percentage(40), // results table
+                Constraint::Percentage(60), // logs
+            ])
+            .split(area);
+
+        // Title
+        let title_text = if self.benchmark_running {
+            format!(" 📊 BENCHMARKING: {} (Running...)", self.model_input)
+        } else {
+            format!(" 📊 BENCHMARKING: {} (Completed)", self.model_input)
+        };
+        let title = Paragraph::new(Line::from(vec![
+            Span::styled(title_text, theme::title_style()),
+        ]))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
+        );
+        frame.render_widget(title, chunks[0]);
+
+        // Results Table
+        let header = Row::new(vec!["Benchmark", "Metric", "Score"])
+            .style(
+                Style::default()
+                    .fg(theme::NEON_CYAN)
+                    .add_modifier(Modifier::BOLD)
+                    .bg(theme::BG_SURFACE),
+            )
+            .height(1)
+            .bottom_margin(1);
+
+        let rows: Vec<Row> = self.benchmark_results.iter().map(|(bench, metric, value)| {
+            Row::new(vec![
+                Cell::from(Span::styled(bench, theme::highlight_value())),
+                Cell::from(metric.clone()),
+                Cell::from(Span::styled(value, Style::default().fg(theme::NEON_MAGENTA))),
+            ])
+            .height(1)
+        }).collect();
+
+        let widths = [
+            Constraint::Percentage(40),
+            Constraint::Percentage(30),
+            Constraint::Percentage(30),
+        ];
+
+        let results_table = Table::new(rows, widths)
+            .header(header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(theme::BORDER_ACTIVE))
+                    .title("Live Results")
+                    .style(Style::default().bg(theme::BG_DARK)),
+            )
+            .column_spacing(2);
+
+        frame.render_widget(results_table, chunks[1]);
+
+        // Logs
+        let log_lines_ui: Vec<Line> = self.log_lines.iter().map(|(msg, level)| {
+            let style = match level {
+                LogLevel::Info => Style::default().fg(theme::TEXT_PRIMARY),
+                LogLevel::Success => Style::default().fg(theme::NEON_GREEN),
+                LogLevel::Warning => Style::default().fg(theme::NEON_AMBER),
+                LogLevel::Error => Style::default().fg(theme::NEON_RED),
+                LogLevel::Dim => theme::dim_style(),
+            };
+            Line::from(Span::styled(msg, style))
+        }).collect();
+
+        let log_len = log_lines_ui.len();
+        let log_height = chunks[2].height.saturating_sub(2) as usize; // account for borders
+
+        // Handle auto-scrolling
+        if self.log_auto_scroll {
+            if log_len > log_height {
+                self.log_scroll = log_len - log_height;
+            } else {
+                self.log_scroll = 0;
+            }
+        }
+        
+        let max_scroll = log_len.saturating_sub(log_height);
+        if self.log_scroll > max_scroll {
+            self.log_scroll = max_scroll;
+        }
+
+        let logs = Paragraph::new(log_lines_ui)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                    .title("Process Log"),
+            )
+            .scroll((self.log_scroll as u16, 0));
+
+        frame.render_widget(logs, chunks[2]);
+    }
+
     // ─── Chat Screen ───────────────────────────────────────────
 
     fn render_chat(&self, frame: &mut Frame, area: Rect) {
@@ -2377,8 +3145,23 @@ impl App {
         );
         frame.render_widget(input, chunks[2]);
 
+        // Status bar
+        let status_text = if self.chat_loading {
+            "⏳ Loading model... Please wait."
+        } else if self.chat_streaming {
+            "💭 Generating response..."
+        } else {
+            "Press Enter to send · Esc to exit"
+        };
+        let status = Paragraph::new(Line::from(Span::styled(
+            status_text,
+            theme::dim_style(),
+        )))
+        .alignment(Alignment::Center);
+        frame.render_widget(status, chunks[3]);
+
         // Cursor
-        let cursor_x = chunks[2].x + 1 + self.chat_input.len() as u16;
+        let cursor_x = chunks[2].x + 1 + char_len(&self.chat_input) as u16;
         let cursor_y = chunks[2].y + 1;
         frame.set_cursor_position((cursor_x, cursor_y));
     }
@@ -2386,12 +3169,47 @@ impl App {
     // ─── Confirm Dialog ────────────────────────────────────────
 
     fn render_confirm_dialog(&mut self, frame: &mut Frame, area: Rect) {
-        let dialog_width = 50.min(area.width.saturating_sub(4));
-        let dialog_height = 8;
+        let dialog_width = 60.min(area.width.saturating_sub(4));
+        let dialog_height = 9;
         let dialog_area = centered_rect_fixed(dialog_width, dialog_height, area);
 
         // Clear background
         frame.render_widget(Clear, dialog_area);
+
+        // Spell out irreversible actions so the target is never ambiguous.
+        let prompt = match &self.screen {
+            Screen::Confirm(ConfirmAction::DeleteCheckpoint(model)) => {
+                Some(format!("Permanently delete the checkpoint for {model}?"))
+            }
+            _ => None,
+        };
+
+        let dialog = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
+            .border_style(Style::default().fg(theme::NEON_AMBER))
+            .title(Span::styled(" ⚠ Confirm ", theme::warning_style()))
+            .title_alignment(Alignment::Center)
+            .style(Style::default().bg(theme::BG_ELEVATED));
+        let inner = dialog.inner(dialog_area);
+        frame.render_widget(dialog, dialog_area);
+
+        let list_area = if let Some(prompt) = prompt {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Min(0)])
+                .split(inner);
+            frame.render_widget(
+                Paragraph::new(prompt)
+                    .style(Style::default().fg(theme::TEXT_PRIMARY))
+                    .alignment(Alignment::Center)
+                    .wrap(Wrap { trim: true }),
+                chunks[0],
+            );
+            chunks[1]
+        } else {
+            inner
+        };
 
         let items: Vec<ListItem> = self
             .current_menu
@@ -2414,16 +3232,7 @@ impl App {
             })
             .collect();
 
-        let dialog = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Double)
-                .border_style(Style::default().fg(theme::NEON_AMBER))
-                .title(Span::styled(" ⚠ Confirm ", theme::warning_style()))
-                .title_alignment(Alignment::Center)
-                .style(Style::default().bg(theme::BG_ELEVATED)),
-        );
-        frame.render_stateful_widget(dialog, dialog_area, &mut self.menu_state);
+        frame.render_stateful_widget(List::new(items), list_area, &mut self.menu_state);
     }
 
     fn render_checkpoint_prompt_dialog(&mut self, frame: &mut Frame, area: Rect) {
@@ -2629,4 +3438,63 @@ fn text_sparkline(data: &[f64], width: usize) -> String {
             bars[idx.min(7)]
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_handles_multibyte_input() {
+        // Regression: the old code used the char cursor as a byte index, so
+        // typing after a multi-byte character panicked on a non-boundary.
+        let mut s = String::from("éa");
+        let mut cursor = 1;
+        cursor = insert_at_char_cursor(&mut s, cursor, 'X');
+        assert_eq!(s, "éXa");
+        assert_eq!(cursor, 2);
+    }
+
+    #[test]
+    fn insert_at_end_appends() {
+        let mut s = String::from("héllo");
+        let cursor = insert_at_char_cursor(&mut s, char_len("héllo"), '!');
+        assert_eq!(s, "héllo!");
+        assert_eq!(cursor, 6);
+    }
+
+    #[test]
+    fn backspace_removes_whole_character() {
+        let mut s = String::from("héllo");
+        let cursor = remove_before_char_cursor(&mut s, 2);
+        assert_eq!(s, "hllo");
+        assert_eq!(cursor, 1);
+    }
+
+    #[test]
+    fn backspace_at_start_is_a_no_op() {
+        let mut s = String::from("é");
+        let cursor = remove_before_char_cursor(&mut s, 0);
+        assert_eq!(s, "é");
+        assert_eq!(cursor, 0);
+    }
+
+    #[test]
+    fn typing_every_position_never_panics() {
+        // Walk a cursor through mixed-width text, inserting at each stop.
+        for cursor in 0..=char_len("éàü😀z") {
+            let mut s = String::from("éàü😀z");
+            insert_at_char_cursor(&mut s, cursor, 'q');
+            assert_eq!(char_len(&s), 6);
+        }
+    }
+
+    #[test]
+    fn mask_secret_does_not_split_characters() {
+        assert_eq!(mask_secret("hf_abcdef"), "hf_******");
+        assert_eq!(mask_secret("ab"), "**");
+        assert_eq!(mask_secret(""), "");
+        // Multi-byte input would panic under byte slicing.
+        assert_eq!(mask_secret("éàüxy"), "éàü**");
+    }
 }

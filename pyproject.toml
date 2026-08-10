@@ -33,6 +33,7 @@ dependencies = [
     "numpy~=2.2",
     "optuna~=4.7",
     "peft~=0.19",
+    "pillow>=10.0",
     "psutil~=7.2",
     "py-cpuinfo~=9.0",
     "pydantic-settings~=2.13",
@@ -42,6 +43,7 @@ dependencies = [
     "sentencepiece~=0.2",
     "tiktoken~=0.12",
     "tomli-w~=1.2",
+    "torchvision>=0.15",
     "tqdm~=4.67",
     "transformers[kernels]~=5.6",
 ]

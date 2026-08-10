@@ -1,0 +1,162 @@
+"""Benchmark runner for the Annihilation TUI.
+
+Loads the base model, finds the best trial from checkpoints,
+applies abliteration, and then runs lm-eval benchmarks.
+
+Usage: python -u scripts/run_benchmarks.py <model_name> [benchmark1,benchmark2,...]
+"""
+import json
+import sys
+import os
+from pathlib import Path
+from typing import cast, Any
+
+# Ensure src is in the path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.annihilate.model import Model, AbliterationParameters
+from src.annihilate.config import Settings
+from src.annihilate.export import read_trial_attributes, settings_from_checkpoint
+from src.annihilate.utils import checkpoint_name_for_model, load_prompts
+import torch
+import torch.nn.functional as F
+import lm_eval
+from lm_eval.models.huggingface import HFLM
+
+
+def print_event(event_type: str, content: str):
+    print(json.dumps({"type": event_type, "content": content}), flush=True)
+
+
+def load_optimal_trial_and_merge(model_name: str) -> Model:
+    """Load the base model and reconstruct the best abliterated version from checkpoints."""
+    original_argv = sys.argv.copy()
+    sys.argv = sys.argv[:1]
+    base_settings = Settings(model=model_name)
+    sys.argv = original_argv
+
+    # Must match how main.py names the file, or no checkpoint is ever found.
+    sanitized = checkpoint_name_for_model(model_name)
+    checkpoint_path = Path(__file__).parent.parent / base_settings.study_checkpoint_dir / f"{sanitized}.jsonl"
+
+    if not checkpoint_path.exists():
+        print_event("error", f"No checkpoint found at {checkpoint_path}. Run annihilation first.")
+        sys.exit(1)
+
+    # Reconstructing a trial under different settings silently produces a
+    # different model, so reuse the settings the study was run with (including
+    # the pinned model_commit revision).
+    settings = settings_from_checkpoint(str(checkpoint_path), model_name)
+
+    # Ensure batch_size is valid
+    if settings.batch_size == 0:
+        settings.batch_size = 16
+
+    # Ensure seed is valid (needed for torch.manual_seed in abliterate)
+    if settings.seed is None:
+        settings.seed = 42
+
+    trials = read_trial_attributes(str(checkpoint_path))
+
+    best_trial_params = None
+    best_direction_index = None
+    best_kl = float('inf')
+    best_refusals = float('inf')
+
+    for trial_id, attrs in trials.items():
+        refusals = attrs.get("refusals", float('inf'))
+        kl = attrs.get("kl_divergence", float('inf'))
+
+        if refusals < best_refusals or (refusals == best_refusals and kl < best_kl):
+            best_refusals = refusals
+            best_kl = kl
+            best_trial_params = attrs.get("parameters")
+            best_direction_index = attrs.get("direction_index")
+
+    if not best_trial_params:
+        print_event("error", "No successful trials found in checkpoint.")
+        sys.exit(1)
+
+    print_event("status", f"Loading model {model_name}...")
+    model = Model(settings)
+
+    print_event("status", "Calculating refusal directions...")
+    good_prompts = load_prompts(settings, settings.good_prompts)
+    bad_prompts = load_prompts(settings, settings.bad_prompts)
+
+    good_means = model.get_residuals_mean(good_prompts)
+    bad_means = model.get_residuals_mean(bad_prompts)
+
+    refusal_directions = F.normalize(bad_means - good_means, p=2, dim=1)
+
+    if settings.orthogonalize_direction:
+        good_directions = F.normalize(good_means, p=2, dim=1)
+        projection_vector = torch.sum(refusal_directions * good_directions, dim=1)
+        refusal_directions = refusal_directions - projection_vector.unsqueeze(1) * good_directions
+        refusal_directions = F.normalize(refusal_directions, p=2, dim=1)
+
+    print_event("status", "Applying abliteration parameters...")
+    parameters = {k: AbliterationParameters(**v) for k, v in best_trial_params.items()}
+    model.abliterate(refusal_directions, best_direction_index, parameters)
+
+    return model
+
+
+def main():
+    if len(sys.argv) < 2:
+        print_event("error", "Missing model name argument")
+        sys.exit(1)
+
+    model_name = sys.argv[1]
+
+    # Default benchmarks if none specified
+    benchmarks = ["hellaswag", "arc_easy"]
+    if len(sys.argv) > 2:
+        benchmarks = sys.argv[2].split(",")
+
+    try:
+        model = load_optimal_trial_and_merge(model_name)
+
+        # Initialize lm-eval wrapper
+        print_event("status", "Initializing evaluation harness...")
+        hflm = HFLM(pretrained=model.model, tokenizer=model.tokenizer, batch_size="auto")
+
+        for benchmark in benchmarks:
+            print_event("status", f"Running benchmark {benchmark}...")
+
+            results = lm_eval.simple_evaluate(
+                model=hflm,
+                tasks=[benchmark],
+            )
+
+            # simple_evaluate returns None on non-primary ranks, and omits the
+            # task key entirely if it produced no metrics.
+            benchmark_results = (results or {}).get("results", {}).get(benchmark)
+            if not benchmark_results:
+                print_event("error", f"Benchmark {benchmark} returned no results.")
+                continue
+
+            for metric, value in benchmark_results.items():
+                if metric != "alias":
+                    if isinstance(value, float):
+                        value_str = f"{value:.4f}"
+                    else:
+                        value_str = f"{value}"
+
+                    # Send result event to TUI
+                    print(json.dumps({
+                        "type": "result",
+                        "benchmark": benchmark,
+                        "metric": metric,
+                        "value": value_str
+                    }), flush=True)
+
+        print_event("done", "Benchmarks completed successfully.")
+
+    except Exception as e:
+        import traceback
+        print_event("error", traceback.format_exc())
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

@@ -14,7 +14,7 @@ use crate::parser::{self, ParsedEvent};
 /// Discover the repo root by walking up from the running binary.
 /// The binary lives at `<repo>/tui/target/{debug|release}/annihilate`,
 /// so the repo root is 3 levels up. Falls back to the current working directory.
-fn repo_root() -> PathBuf {
+pub fn repo_root() -> PathBuf {
     let mut current = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     loop {
         if current.join("pyproject.toml").exists() {
@@ -44,6 +44,51 @@ fn python_exe() -> PathBuf {
 
     // Fallback if none exist (will likely crash on spawn, but we try the standard)
     root.join(".venv").join("Scripts").join("python.exe")
+}
+
+/// Turn a model reference into the checkpoint filename stem used by the Python side.
+///
+/// This must match `checkpoint_name_for_model` in `src/annihilate/utils.py`
+/// exactly: every character that is not alphanumeric, `_` or `-` becomes `--`.
+/// Note that this mangles dots, so `meta-llama/Llama-3.1-8B` becomes
+/// `meta-llama--Llama-3--1-8B`. A near-miss here (e.g. only replacing path
+/// separators) makes the TUI look for checkpoints that will never exist.
+///
+/// The result is inherently filesystem-safe, since every character illegal in
+/// a Windows filename is among those replaced.
+pub fn checkpoint_name(model: &str) -> String {
+    let mut out = String::with_capacity(model.len());
+    for ch in model.chars() {
+        if ch.is_alphanumeric() || ch == '_' || ch == '-' {
+            out.push(ch);
+        } else {
+            out.push_str("--");
+        }
+    }
+    out
+}
+
+/// Turn a model reference into a filesystem-safe stem for export filenames.
+///
+/// Unlike [`checkpoint_name`] this preserves dots, so an exported GGUF keeps a
+/// readable name (`meta-llama--Llama-3.1-8B-Q4_K_M.gguf`). Use it only for
+/// names the TUI itself owns — never for locating a checkpoint.
+pub fn sanitize_model_name(model: &str) -> String {
+    let replaced = model.replace(['/', '\\'], "--");
+    let mut out = String::with_capacity(replaced.len());
+    for ch in replaced.chars() {
+        match ch {
+            ':' | '*' | '?' | '"' | '<' | '>' | '|' => out.push('-'),
+            c if c.is_control() => {}
+            c => out.push(c),
+        }
+    }
+    let trimmed = out.trim_matches(['.', ' ']).to_string();
+    if trimmed.is_empty() {
+        "model".to_string()
+    } else {
+        trimmed
+    }
 }
 
 /// Messages sent from the subprocess to the UI.
@@ -250,6 +295,244 @@ impl SubprocessManager {
         }
     }
 
+    /// Spawns the python script for converting a model to GGUF format
+    pub fn spawn_gguf_convert(model_path: &str, quant_type: &str) -> Self {
+        let (tx, rx) = mpsc::channel::<SubprocessMessage>();
+
+        let root = repo_root();
+        let python = python_exe();
+        let sanitized = sanitize_model_name(model_path);
+        let output_dir = root.join("exports");
+        let _ = std::fs::create_dir_all(&output_dir);
+        let output_path = output_dir.join(format!("{sanitized}-{quant_type}.gguf"));
+
+        let mut cmd = Command::new(&python);
+        cmd.arg("-u");
+        cmd.arg("scripts/gguf_converter.py");
+        cmd.arg("--model-path").arg(model_path);
+        cmd.arg("--quant-type").arg(quant_type);
+        cmd.arg("--output").arg(&output_path);
+
+        cmd.current_dir(&root);
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        cmd.stdin(Stdio::piped());
+        cmd.env("PYTHONIOENCODING", "utf-8");
+        cmd.env("PYTHONUNBUFFERED", "1");
+        cmd.env("PYTHONWARNINGS", "ignore");
+
+        match cmd.spawn() {
+            Ok(mut child) => {
+                let stdout = child.stdout.take();
+                let stderr = child.stderr.take();
+                let stdin = child.stdin.take();
+
+                if let Some(stdout) = stdout {
+                    let tx_out = tx.clone();
+                    thread::spawn(move || {
+                        let reader = BufReader::new(stdout);
+                        for line in reader.lines() {
+                            match line {
+                                Ok(text) => {
+                                    let event = parser::parse_line(&text);
+                                    let _ = tx_out.send(SubprocessMessage::Event(event));
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                    });
+                }
+
+                if let Some(stderr) = stderr {
+                    let tx_err = tx.clone();
+                    thread::spawn(move || {
+                        let reader = BufReader::new(stderr);
+                        for line in reader.lines() {
+                            match line {
+                                Ok(text) => {
+                                    let event = parser::parse_line(&text);
+                                    let _ = tx_err.send(SubprocessMessage::Event(event));
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                    });
+                }
+
+                let stdin_tx = if let Some(mut stdin) = stdin {
+                    let (stx, srx) = mpsc::channel::<String>();
+                    thread::spawn(move || {
+                        while let Ok(input) = srx.recv() {
+                            if stdin.write_all(input.as_bytes()).is_err() { break; }
+                            if stdin.write_all(b"\n").is_err() { break; }
+                            let _ = stdin.flush();
+                        }
+                    });
+                    Some(stx)
+                } else {
+                    None
+                };
+
+                Self { rx, child: Some(child), stdin_tx }
+            }
+            Err(e) => {
+                let _ = tx.send(SubprocessMessage::SpawnError(format!("Failed to start GGUF conversion: {}", e)));
+                Self { rx, child: None, stdin_tx: None }
+            }
+        }
+    }
+
+    /// Spawns the python chat server script
+    pub fn spawn_chat_server(model_name: &str) -> Self {
+        let (tx, rx) = mpsc::channel::<SubprocessMessage>();
+
+        let root = repo_root();
+        let python = python_exe();
+
+        let mut cmd = Command::new(&python);
+        cmd.arg("-u");
+        cmd.arg("scripts/chat_server.py");
+        cmd.arg(model_name);
+
+        cmd.current_dir(&root);
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        cmd.stdin(Stdio::piped());
+        cmd.env("PYTHONIOENCODING", "utf-8");
+        cmd.env("PYTHONUNBUFFERED", "1");
+        cmd.env("PYTHONWARNINGS", "ignore");
+
+        match cmd.spawn() {
+            Ok(mut child) => {
+                let stdout = child.stdout.take();
+                let stderr = child.stderr.take();
+                let stdin = child.stdin.take();
+
+                if let Some(stdout) = stdout {
+                    let tx_out = tx.clone();
+                    thread::spawn(move || {
+                        let reader = BufReader::new(stdout);
+                        for line in reader.lines() {
+                            match line {
+                                Ok(text) => {
+                                    // Let parser parse the JSON lines directly or raw text
+                                    let event = parser::parse_line(&text);
+                                    let _ = tx_out.send(SubprocessMessage::Event(event));
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                    });
+                }
+
+                if let Some(stderr) = stderr {
+                    let tx_err = tx.clone();
+                    thread::spawn(move || {
+                        let reader = BufReader::new(stderr);
+                        for line in reader.lines() {
+                            match line {
+                                Ok(text) => {
+                                    let event = parser::parse_line(&text);
+                                    let _ = tx_err.send(SubprocessMessage::Event(event));
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                    });
+                }
+
+                let stdin_tx = if let Some(mut stdin) = stdin {
+                    let (stx, srx) = mpsc::channel::<String>();
+                    thread::spawn(move || {
+                        while let Ok(input) = srx.recv() {
+                            if stdin.write_all(input.as_bytes()).is_err() { break; }
+                            if stdin.write_all(b"\n").is_err() { break; }
+                            let _ = stdin.flush();
+                        }
+                    });
+                    Some(stx)
+                } else {
+                    None
+                };
+
+                Self { rx, child: Some(child), stdin_tx }
+            }
+            Err(e) => {
+                let _ = tx.send(SubprocessMessage::SpawnError(format!("Failed to start chat server: {}", e)));
+                Self { rx, child: None, stdin_tx: None }
+            }
+        }
+    }
+
+
+
+    /// Spawns the python benchmark script
+    pub fn spawn_benchmark(model_name: &str) -> Self {
+        let (tx, rx) = mpsc::channel::<SubprocessMessage>();
+
+        let root = repo_root();
+        let python = python_exe();
+
+        let mut cmd = Command::new(&python);
+        cmd.arg("-u");
+        cmd.arg("scripts/run_benchmarks.py");
+        cmd.arg(model_name);
+
+        cmd.current_dir(&root);
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        cmd.stdin(Stdio::piped());
+        cmd.env("PYTHONIOENCODING", "utf-8");
+        cmd.env("PYTHONUNBUFFERED", "1");
+        cmd.env("PYTHONWARNINGS", "ignore");
+
+        match cmd.spawn() {
+            Ok(mut child) => {
+                let stdout = child.stdout.take();
+                let stderr = child.stderr.take();
+                let _stdin = child.stdin.take();
+
+                if let Some(stdout) = stdout {
+                    let tx_out = tx.clone();
+                    thread::spawn(move || {
+                        let reader = BufReader::new(stdout);
+                        for line in reader.lines() {
+                            match line {
+                                Ok(text) => {
+                                    let event = parser::parse_line(&text);
+                                    let _ = tx_out.send(SubprocessMessage::Event(event));
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                    });
+                }
+
+                if let Some(stderr) = stderr {
+                    let tx_err = tx.clone();
+                    thread::spawn(move || {
+                        let reader = BufReader::new(stderr);
+                        for line in reader.lines() {
+                            match line {
+                                Ok(text) => {
+                                    let event = parser::parse_line(&text);
+                                    let _ = tx_err.send(SubprocessMessage::Event(event));
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                    });
+                }
+
+                Self { rx, child: Some(child), stdin_tx: None }
+            }
+            Err(e) => {
+                let _ = tx.send(SubprocessMessage::SpawnError(format!("Failed to start benchmark: {}", e)));
+                Self { rx, child: None, stdin_tx: None }
+            }
+        }
+    }
+
     /// Send input text to the subprocess stdin.
     pub fn send_input(&self, text: &str) -> bool {
         if let Some(ref tx) = self.stdin_tx {
@@ -279,8 +562,24 @@ impl SubprocessManager {
     }
 
     /// Check if the subprocess is still running.
-    pub fn is_running(&self) -> bool {
-        self.child.is_some()
+    ///
+    /// This actively polls the child rather than just testing whether a handle
+    /// is held: between the child exiting and the next `poll_messages` call
+    /// (which is what clears the handle) a handle-only check would still
+    /// report the process as running.
+    pub fn is_running(&mut self) -> bool {
+        match self.child {
+            Some(ref mut child) => match child.try_wait() {
+                // Still running.
+                Ok(None) => true,
+                // Exited; leave the handle in place so `poll_messages` can
+                // still surface the exit status exactly once.
+                Ok(Some(_)) => false,
+                // The status is unobtainable, so treat the child as gone.
+                Err(_) => false,
+            },
+            None => false,
+        }
     }
 
     /// Poll for all pending messages (non-blocking).
@@ -312,4 +611,72 @@ impl Drop for SubprocessManager {
 /// Get the repo root path (public for use by app.rs).
 pub fn get_repo_root() -> PathBuf {
     repo_root()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reference implementation of `checkpoint_name_for_model` from
+    /// `src/annihilate/utils.py`, which decides the real filename on disk.
+    fn python_checkpoint_name(model: &str) -> String {
+        model
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '_' || c == '-' {
+                    c.to_string()
+                } else {
+                    "--".to_string()
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn checkpoint_name_matches_python() {
+        // Dotted versions are the case that regressed: the Python side maps
+        // `.` to `--`, so anything that only rewrites path separators looks
+        // for a file that never exists.
+        for model in [
+            "openbmb/MiniCPM5-1B",
+            "meta-llama/Llama-3.1-8B",
+            "mlx-community/Qwen3.6-27B-4bit",
+            "microsoft/Phi-3.5-mini-instruct",
+            "C:\\models\\local_model",
+            "plain",
+        ] {
+            assert_eq!(
+                checkpoint_name(model),
+                python_checkpoint_name(model),
+                "checkpoint name diverged from the Python side for {model:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn checkpoint_name_mangles_dots() {
+        assert_eq!(
+            checkpoint_name("meta-llama/Llama-3.1-8B"),
+            "meta-llama--Llama-3--1-8B"
+        );
+    }
+
+    #[test]
+    fn sanitize_model_name_keeps_dots_but_drops_illegal_chars() {
+        // Export filenames stay readable...
+        assert_eq!(
+            sanitize_model_name("meta-llama/Llama-3.1-8B"),
+            "meta-llama--Llama-3.1-8B"
+        );
+        // ...but a drive-qualified path must not keep its colon, or the
+        // resulting file cannot be created on Windows.
+        assert_eq!(sanitize_model_name("C:\\models\\foo"), "C---models--foo");
+        assert!(!sanitize_model_name("C:\\models\\foo").contains(':'));
+    }
+
+    #[test]
+    fn sanitize_model_name_never_returns_empty() {
+        assert_eq!(sanitize_model_name(""), "model");
+        assert_eq!(sanitize_model_name("..."), "model");
+    }
 }

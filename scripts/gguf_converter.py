@@ -1,0 +1,393 @@
+import argparse
+import hashlib
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+import urllib.parse
+import urllib.request
+import zipfile
+from pathlib import Path
+
+def print_event(level: str, msg: str):
+    print(json.dumps({"level": level, "message": msg}), flush=True)
+
+
+def _find_file(root: Path, name: str) -> Path | None:
+    """Recursively find a file by name under root."""
+    for path in root.rglob(name):
+        return path
+    return None
+
+
+def _download_verified(url: str, dest: Path, expected_sha256: str | None = None) -> str:
+    """Download `url` to `dest`, returning the archive's SHA-256 hex digest.
+
+    These archives are executed (the prebuilt `llama-quantize` binary) and
+    imported (`convert_hf_to_gguf.py`), so they get treated as code:
+
+    * The URL scheme is pinned to HTTPS. The release-asset URL is read out of a
+      JSON response, so without this check a redirected or tampered API reply
+      could point the download at `http://` or `file://`.
+    * The digest is always computed and reported. When `expected_sha256` is
+      known (GitHub publishes one per release asset, and the caller may pin one
+      via the environment) a mismatch is fatal instead of merely logged.
+    """
+    scheme = urllib.parse.urlparse(url).scheme.lower()
+    if scheme != "https":
+        print_event("error", f"Refusing to download over {scheme or 'unknown'}: {url}")
+        sys.exit(1)
+
+    digest = hashlib.sha256()
+    with urllib.request.urlopen(url) as response, open(dest, "wb") as f:
+        for chunk in iter(lambda: response.read(1 << 20), b""):
+            digest.update(chunk)
+            f.write(chunk)
+
+    actual = digest.hexdigest()
+
+    if expected_sha256:
+        if actual.lower() != expected_sha256.strip().lower():
+            dest.unlink(missing_ok=True)
+            print_event(
+                "error",
+                f"Checksum mismatch for {url}: expected {expected_sha256}, got {actual}. "
+                "The download was discarded.",
+            )
+            sys.exit(1)
+        print_event("info", f"Verified SHA-256 {actual} for {dest.name}.")
+    else:
+        print_event(
+            "info",
+            f"SHA-256 of {dest.name} is {actual} (no checksum published to verify against).",
+        )
+
+    return actual
+
+
+def _safe_extract(zip_path: Path, dest: Path):
+    """Extract `zip_path` into `dest`, rejecting members that escape `dest`.
+
+    `ZipFile.extractall` already sanitizes member paths, but it does so
+    silently. Failing loudly means a malformed archive surfaces as an error
+    rather than as files quietly landing somewhere unexpected.
+    """
+    dest_resolved = dest.resolve()
+    with zipfile.ZipFile(zip_path, "r") as zip_ref:
+        for member in zip_ref.namelist():
+            target = (dest_resolved / member).resolve()
+            if target != dest_resolved and dest_resolved not in target.parents:
+                print_event(
+                    "error",
+                    f"Archive {zip_path.name} contains an unsafe path: {member}",
+                )
+                sys.exit(1)
+        zip_ref.extractall(dest)
+
+
+def ensure_llama_cpp(bin_dir: Path):
+    if not bin_dir.exists():
+        bin_dir.mkdir(parents=True, exist_ok=True)
+
+    quantize_name = "llama-quantize.exe" if os.name == "nt" else "llama-quantize"
+    quantize_exe = _find_file(bin_dir, quantize_name)
+
+    # Tag of the release the binaries came from, so the source archive below can
+    # be pinned to the same revision instead of tracking a moving branch head.
+    release_tag = None
+
+    if quantize_exe is None:
+        print_event("info", "Downloading llama.cpp prebuilt binaries...")
+        if os.name == "nt":
+            req = urllib.request.Request(
+                "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            url = None
+            expected_digest = None
+            try:
+                with urllib.request.urlopen(req) as response:
+                    data = json.loads(response.read().decode())
+                    release_tag = data.get("tag_name")
+                    for asset in data["assets"]:
+                        if (
+                            "llama-" in asset["name"]
+                            and "win-cpu-x64" in asset["name"]
+                            and "bin" in asset["name"]
+                        ):
+                            url = asset["browser_download_url"]
+                            # GitHub publishes asset digests as "sha256:<hex>".
+                            digest = asset.get("digest") or ""
+                            if digest.lower().startswith("sha256:"):
+                                expected_digest = digest.split(":", 1)[1]
+                            break
+            except Exception as e:
+                print_event("error", f"Failed to fetch latest release info: {e}")
+                sys.exit(1)
+
+            if not url:
+                print_event("error", "Could not find a valid llama.cpp release asset for Windows.")
+                sys.exit(1)
+
+            # An explicit pin always wins over whatever the API reports.
+            expected_digest = os.environ.get("LLAMA_CPP_BIN_SHA256") or expected_digest
+
+            print_event("info", f"Downloading from {url}...")
+            zip_path = bin_dir / "llama.zip"
+            _download_verified(url, zip_path, expected_digest)
+            _safe_extract(zip_path, bin_dir)
+            zip_path.unlink()
+
+            quantize_exe = _find_file(bin_dir, quantize_name)
+            if quantize_exe is None:
+                print_event("error", f"Could not find {quantize_name} after extraction.")
+                sys.exit(1)
+        else:
+            print_event("error", "Only Windows automatic download is supported currently.")
+            sys.exit(1)
+
+    # Download the full llama.cpp source for convert_hf_to_gguf.py + conversion module.
+    # Prefer the tag matching the binaries just downloaded; only fall back to the
+    # branch head when no tag is known (i.e. the binaries were already cached).
+    ref = f"refs/tags/{release_tag}" if release_tag else "refs/heads/master"
+    src_dir_name = f"llama.cpp-{release_tag}" if release_tag else "llama.cpp-master"
+    src_dir = bin_dir / src_dir_name
+    convert_py = src_dir / "convert_hf_to_gguf.py"
+    if not convert_py.exists():
+        # A previous run may have cached the source under a different ref.
+        cached = _find_file(bin_dir, "convert_hf_to_gguf.py")
+        if cached is not None:
+            convert_py = cached
+        else:
+            print_event("info", f"Downloading llama.cpp source ({ref}) for conversion scripts...")
+            url = f"https://github.com/ggml-org/llama.cpp/archive/{ref}.zip"
+            src_zip = bin_dir / "llama_src.zip"
+            _download_verified(url, src_zip, os.environ.get("LLAMA_CPP_SRC_SHA256"))
+            _safe_extract(src_zip, bin_dir)
+            src_zip.unlink()
+
+            convert_py = _find_file(bin_dir, "convert_hf_to_gguf.py")
+            if convert_py is None:
+                print_event("error", "Could not find convert_hf_to_gguf.py after extraction.")
+                sys.exit(1)
+
+    # Ensure gguf package is installed
+    try:
+        import gguf  # noqa: F401
+    except ImportError:
+        print_event("info", "Installing gguf python package...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "gguf"])
+
+    return quantize_exe, convert_py
+
+
+def load_optimal_trial_and_merge(model_name: str) -> str:
+    # Needs to be able to import src
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from src.annihilate.utils import checkpoint_name_for_model
+
+    # Must match how main.py names the file, or no checkpoint is ever found.
+    sanitized = checkpoint_name_for_model(model_name)
+    checkpoint_path = Path(__file__).parent.parent / "checkpoints" / f"{sanitized}.jsonl"
+
+    if not checkpoint_path.exists():
+        print_event("error", f"Error: {model_name} is not a directory, and no checkpoint was found.")
+        sys.exit(1)
+
+    print_event("info", f"Found completed runs for {model_name}. Reconstructing optimal trial...")
+
+    from src.annihilate.model import Model, AbliterationParameters
+    from src.annihilate.export import read_trial_attributes, settings_from_checkpoint
+    from src.annihilate.system import empty_cache
+    from src.annihilate.utils import load_prompts
+    import torch
+    import torch.nn.functional as F
+
+    # Reconstructing a trial under different settings silently produces a
+    # different model, so reuse the settings the study was run with (including
+    # the pinned model_commit revision).
+    settings = settings_from_checkpoint(str(checkpoint_path), model_name)
+
+    # Ensure batch_size is valid
+    if settings.batch_size == 0:
+        settings.batch_size = 16
+
+    # Ensure seed is valid (needed for torch.manual_seed in abliterate)
+    if settings.seed is None:
+        settings.seed = 42
+
+    trials = read_trial_attributes(str(checkpoint_path))
+
+    best_trial_params = None
+    best_direction_index = None
+    best_kl = float('inf')
+    best_refusals = float('inf')
+    best_trial_id = -1
+
+    for trial_id, attrs in trials.items():
+        refusals = attrs.get("refusals", float('inf'))
+        kl = attrs.get("kl_divergence", float('inf'))
+
+        if refusals < best_refusals or (refusals == best_refusals and kl < best_kl):
+            best_refusals = refusals
+            best_kl = kl
+            best_trial_params = attrs.get("parameters")
+            best_direction_index = attrs.get("direction_index")
+            best_trial_id = trial_id
+
+    if not best_trial_params:
+        print_event("error", f"Could not find any successful trials in {checkpoint_path}")
+        sys.exit(1)
+        
+    print_event("info", f"Selected Trial {best_trial_id} ({best_refusals} refusals, KL Div: {best_kl:.4f}). Loading base model...")
+    
+    model = Model(settings)
+
+    print_event("info", "Calculating refusal directions...")
+    if settings.batch_size == 0:
+        settings.batch_size = 16
+        
+    good_prompts = load_prompts(settings, settings.good_prompts)
+    bad_prompts = load_prompts(settings, settings.bad_prompts)
+
+    good_means = model.get_residuals_mean(good_prompts)
+    bad_means = model.get_residuals_mean(bad_prompts)
+
+    refusal_directions = F.normalize(bad_means - good_means, p=2, dim=1)
+
+    if settings.orthogonalize_direction:
+        good_directions = F.normalize(good_means, p=2, dim=1)
+        projection_vector = torch.sum(refusal_directions * good_directions, dim=1)
+        refusal_directions = refusal_directions - projection_vector.unsqueeze(1) * good_directions
+        refusal_directions = F.normalize(refusal_directions, p=2, dim=1)
+
+    print_event("info", "Applying abliteration parameters...")
+    parameters = {k: AbliterationParameters(**v) for k, v in best_trial_params.items()}
+    model.abliterate(refusal_directions, best_direction_index, parameters)
+    
+    print_event("info", "Merging model...")
+    merged = model.get_merged_model()
+    
+    out_dir = Path(__file__).parent / f"gguf_tmp_export_{sanitized}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    print_event("info", f"Saving merged model to temporary folder for conversion...")
+    merged.save_pretrained(out_dir, max_shard_size="10GB")
+    model.tokenizer.save_pretrained(out_dir)
+    if getattr(model, "processor", None) is not None:
+        model.processor.save_pretrained(out_dir)
+        
+    del merged
+    del model
+    empty_cache()
+    
+    return str(out_dir)
+
+
+def _stream_output(proc: subprocess.Popen) -> int:
+    """Relay a child's merged stdout/stderr as debug events, then return its code.
+
+    `Popen.stdout` is only non-None when `stdout=PIPE` was requested; guarding
+    keeps a mis-configured call from raising `TypeError: 'NoneType' is not
+    iterable` and masking the child's real failure.
+    """
+    if proc.stdout is not None:
+        with proc.stdout:
+            for line in proc.stdout:
+                print_event("debug", line.strip())
+    return proc.wait()
+
+
+def convert_to_gguf(model_path: str, quant_type: str, output_path: str):
+    bin_dir = Path(__file__).parent / "llama_cpp_bin"
+    quantize_exe, convert_py = ensure_llama_cpp(bin_dir)
+
+    temp_merged_dir = None
+    if not os.path.exists(model_path):
+        temp_merged_dir = load_optimal_trial_and_merge(model_path)
+        model_path = temp_merged_dir
+
+    try:
+        # 1. Convert HF model to F16 GGUF.
+        # The intermediate always lives next to the target with a `-F16` suffix,
+        # even when the target itself is F16 (in which case the move below just
+        # renames it). Previously the suffix was computed from the target path,
+        # so an already-`-F16`-named target produced a duplicate `-F16-F16.gguf`
+        # that broke the move/cleanup below.
+        print_event("info", f"Converting {model_path} to F16 GGUF...")
+        f16_gguf = str(Path(output_path).with_suffix("")) + "-F16.gguf"
+    
+        # Run convert_hf_to_gguf.py from its own directory so it can find the
+        # sibling `conversion` package, and set NO_LOCAL_GGUF so it uses the
+        # pip-installed gguf package instead of a local gguf-py/ directory.
+        env = os.environ.copy()
+        env["NO_LOCAL_GGUF"] = "1"
+    
+        cmd = [
+            sys.executable,
+            str(convert_py),
+            model_path,
+            "--outfile",
+            f16_gguf,
+            "--outtype",
+            "f16",
+        ]
+    
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=str(convert_py.parent),
+            env=env,
+        )
+        returncode = _stream_output(proc)
+
+        if returncode != 0 or not os.path.exists(f16_gguf):
+            print_event("error", "Conversion to F16 GGUF failed.")
+            sys.exit(1)
+    
+        if quant_type.upper() == "F16":
+            shutil.move(f16_gguf, output_path)
+            print_event("info", f"GGUF conversion complete: {output_path}")
+            return
+    
+        # 2. Quantize from F16 to the target type
+        print_event("info", f"Quantizing to {quant_type}...")
+        cmd = [str(quantize_exe), f16_gguf, output_path, quant_type]
+    
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace"
+        )
+        returncode = _stream_output(proc)
+
+        if returncode != 0:
+            print_event("error", "Quantization failed.")
+            sys.exit(1)
+    
+        # Cleanup intermediate F16 file
+        os.remove(f16_gguf)
+        print_event("info", f"GGUF quantization complete: {output_path}")
+
+    finally:
+        if temp_merged_dir and os.path.exists(temp_merged_dir):
+            shutil.rmtree(temp_merged_dir, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model-path", required=True)
+    parser.add_argument("--quant-type", required=True)
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args()
+
+    try:
+        convert_to_gguf(args.model_path, args.quant_type, args.output)
+    except Exception as e:
+        print_event("error", str(e))
+        sys.exit(1)
+

@@ -45,6 +45,8 @@ patch_tqdm()
 """
 
 import logging
+logging.getLogger("torch.utils.flop_counter").setLevel(logging.ERROR)
+
 import math
 import os
 
@@ -110,6 +112,7 @@ from .reproduce import (
 )
 from .system import empty_cache, get_accelerator_info
 from .utils import (
+    checkpoint_name_for_model,
     format_duration,
     format_exception,
     get_file_sha256,
@@ -331,10 +334,7 @@ def run():
 
     study_checkpoint_file = os.path.join(
         settings.study_checkpoint_dir,
-        "".join(
-            [(c if (c.isalnum() or c in ["_", "-"]) else "--") for c in settings.model]
-        )
-        + ".jsonl",
+        checkpoint_name_for_model(settings.model) + ".jsonl",
     )
 
     lock_obj = JournalFileOpenLock(study_checkpoint_file)
@@ -408,9 +408,28 @@ def run():
             choice = prompt_select("How would you like to proceed?", choices)
 
         if choice == "continue":
-            settings = Settings.model_validate_json(
+            # The stored settings JSON omits every field marked exclude=True, so
+            # model_validate_json resets those to their defaults. Carry the
+            # current run's values across for both the excluded fields (which
+            # the checkpoint cannot restore at all) and the execution settings
+            # the user may have changed on this invocation.
+            restored = Settings.model_validate_json(
                 existing_study.user_attrs["settings"]
             )
+
+            excluded_fields = [
+                name
+                for name, field in Settings.model_fields.items()
+                if field.exclude
+            ]
+            overrides = {
+                name: getattr(settings, name)
+                for name in excluded_fields + ["n_trials", "quantization", "batch_size"]
+            }
+
+            settings = restored
+            for name, value in overrides.items():
+                setattr(settings, name, value)
         elif choice == "restart":
             os.unlink(study_checkpoint_file)
             backend = JournalFileBackend(study_checkpoint_file, lock_obj=lock_obj)

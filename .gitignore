@@ -18,6 +18,11 @@ wheels/
 # Configuration files
 /config.toml
 
+# Secrets (HF_TOKEN is written here by the TUI)
+.env
+.env.*
+!.env.example
+
 # Study checkpoints
 /checkpoints/
 
@@ -44,3 +49,12 @@ test_out.txt
 # TUI state files
 .recent_models
 tui/.recent_models
+
+# Downloaded llama.cpp binaries / source used by GGUF conversion
+/scripts/llama_cpp_bin/
+/scripts/gguf_tmp_export_*/
+/exports/
+*.gguf
+
+# Stray MSVC debug artifacts
+*.pdb

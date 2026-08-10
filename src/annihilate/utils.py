@@ -226,6 +226,18 @@ def is_hf_path(path: str) -> bool:
     return True
 
 
+def checkpoint_name_for_model(model: str) -> str:
+    """The checkpoint filename stem for a model, without the ``.jsonl`` suffix.
+
+    This mirrors the sanitization in ``main.py``: every character that is not
+    alphanumeric, underscore or hyphen is replaced with ``--``. Keep the two in
+    sync — a mismatch makes every script fail to find a checkpoint.
+    """
+    return "".join(
+        [(c if (c.isalnum() or c in ["_", "-"]) else "--") for c in model]
+    )
+
+
 @dataclass
 class Prompt:
     system: str

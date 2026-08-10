@@ -92,6 +92,13 @@ pub fn parse_line(raw: &str) -> ParsedEvent {
         return ParsedEvent::Raw(String::new());
     }
 
+    // JSON protocol lines from chat/benchmark/GGUF scripts must stay Raw.
+    // Otherwise phrases like "Loading model" inside JSON get misclassified
+    // and the TUI never sees ready/status/token/result events.
+    if line.starts_with('{') && line.ends_with('}') {
+        return ParsedEvent::Raw(line);
+    }
+
     // Model loading
     if line.contains("Loading model") || line.contains("loading model") {
         return ParsedEvent::ModelLoading(line.clone());
@@ -266,12 +273,11 @@ mod tests {
     #[test]
     fn test_parse_trial() {
         match parse_line("Running trial 5 of 200") {
-            ParsedEvent::TrialComplete {
+            ParsedEvent::TrialStarting {
                 trial_number: 5,
                 total_trials: 200,
-                ..
             } => {}
-            other => panic!("Expected TrialComplete, got {:?}", other),
+            other => panic!("Expected TrialStarting, got {:?}", other),
         }
     }
 
@@ -284,6 +290,28 @@ mod tests {
                 ..
             } => {}
             other => panic!("Expected TrialComplete, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_json_protocol_stays_raw() {
+        let status = r#"{"type": "status", "content": "Loading model..."}"#;
+        match parse_line(status) {
+            ParsedEvent::Raw(line) => assert_eq!(line, status),
+            other => panic!("Expected Raw JSON status, got {:?}", other),
+        }
+
+        let ready = r#"{"type": "ready"}"#;
+        match parse_line(ready) {
+            ParsedEvent::Raw(line) => assert_eq!(line, ready),
+            other => panic!("Expected Raw JSON ready, got {:?}", other),
+        }
+
+        let refusal_status =
+            r#"{"type": "status", "content": "Calculating refusal directions..."}"#;
+        match parse_line(refusal_status) {
+            ParsedEvent::Raw(line) => assert_eq!(line, refusal_status),
+            other => panic!("Expected Raw JSON refusal status, got {:?}", other),
         }
     }
 }
