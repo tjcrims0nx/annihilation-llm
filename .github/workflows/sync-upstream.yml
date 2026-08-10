@@ -47,21 +47,27 @@ jobs:
           rm -rf src/heretic
 
           python - <<'PY'
+          import re
           from pathlib import Path
 
+          # Ordered longest-key-first and applied in a single regex pass.
+          # Sequential str.replace() calls corrupt already-substituted text:
+          # the bare "heretic" rule ran last and rewrote the URL produced by
+          # an earlier rule into "https://github.com/p-e-w/annihilate".
           replacements = {
+              "https://github.com/p-e-w/heretic": "https://github.com/tjcrims0nx/annihilation-llm",
+              "https://heretic-project.org": "https://github.com/tjcrims0nx/annihilation-llm",
               "heretic-llm": "annihilate-llm",
               "Heretic": "Annihilate",
               "heretic": "annihilate",
-              "https://heretic-project.org": "https://github.com/tjcrims0nx/annihilation-llm",
-              "https://github.com/p-e-w/heretic": "https://github.com/tjcrims0nx/annihilation-llm",
           }
+          pattern = re.compile("|".join(re.escape(key) for key in replacements))
 
           for path in Path("src/annihilate").rglob("*.py"):
-              text = path.read_text()
-              for old, new in replacements.items():
-                  text = text.replace(old, new)
-              path.write_text(text)
+              text = path.read_text(encoding="utf-8")
+              new = pattern.sub(lambda m: replacements[m.group(0)], text)
+              if new != text:
+                  path.write_text(new, encoding="utf-8")
           PY
 
           git add -A
