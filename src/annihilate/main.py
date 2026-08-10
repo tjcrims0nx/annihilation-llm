@@ -46,6 +46,7 @@ patch_tqdm()
 """
 
 import logging
+
 logging.getLogger("torch.utils.flop_counter").setLevel(logging.ERROR)
 
 import math
@@ -419,9 +420,7 @@ def run():
             )
 
             excluded_fields = [
-                name
-                for name, field in Settings.model_fields.items()
-                if field.exclude
+                name for name, field in Settings.model_fields.items() if field.exclude
             ]
             overrides = {
                 name: getattr(settings, name)

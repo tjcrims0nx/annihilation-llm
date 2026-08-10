@@ -234,9 +234,7 @@ def checkpoint_name_for_model(model: str) -> str:
     alphanumeric, underscore or hyphen is replaced with ``--``. Keep the two in
     sync — a mismatch makes every script fail to find a checkpoint.
     """
-    return "".join(
-        [(c if (c.isalnum() or c in ["_", "-"]) else "--") for c in model]
-    )
+    return "".join([(c if (c.isalnum() or c in ["_", "-"]) else "--") for c in model])
 
 
 @dataclass

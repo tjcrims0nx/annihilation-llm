@@ -216,9 +216,7 @@ def export_model(checkpoint_path: str, trial_id: int, output_dir: str):
         output_path.mkdir(parents=True, exist_ok=True)
 
         print_event("info", f"Saving merged model to {output_path}...")
-        merged.save_pretrained(
-            output_path, max_shard_size=settings.max_shard_size
-        )
+        merged.save_pretrained(output_path, max_shard_size=settings.max_shard_size)
         model.tokenizer.save_pretrained(output_path)
         if model.processor is not None:
             model.processor.save_pretrained(output_path)
@@ -235,9 +233,13 @@ def main():
     parser = argparse.ArgumentParser(
         description="Export a trial from a study checkpoint as a merged model."
     )
-    parser.add_argument("--checkpoint", required=True, help="Path to the .jsonl checkpoint.")
+    parser.add_argument(
+        "--checkpoint", required=True, help="Path to the .jsonl checkpoint."
+    )
     parser.add_argument("--trial-id", required=True, type=int, help="Trial to export.")
-    parser.add_argument("--output", required=True, help="Directory to write the model to.")
+    parser.add_argument(
+        "--output", required=True, help="Directory to write the model to."
+    )
     args = parser.parse_args()
 
     try:

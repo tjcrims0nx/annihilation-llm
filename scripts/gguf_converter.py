@@ -1,8 +1,8 @@
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
-import platform
 import shutil
 import subprocess
 import sys
@@ -10,6 +10,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
+
 
 def print_event(level: str, msg: str):
     print(json.dumps({"level": level, "message": msg}), flush=True)
@@ -128,7 +129,10 @@ def ensure_llama_cpp(bin_dir: Path):
                 sys.exit(1)
 
             if not url:
-                print_event("error", "Could not find a valid llama.cpp release asset for Windows.")
+                print_event(
+                    "error",
+                    "Could not find a valid llama.cpp release asset for Windows.",
+                )
                 sys.exit(1)
 
             # An explicit pin always wins over whatever the API reports.
@@ -142,10 +146,14 @@ def ensure_llama_cpp(bin_dir: Path):
 
             quantize_exe = _find_file(bin_dir, quantize_name)
             if quantize_exe is None:
-                print_event("error", f"Could not find {quantize_name} after extraction.")
+                print_event(
+                    "error", f"Could not find {quantize_name} after extraction."
+                )
                 sys.exit(1)
         else:
-            print_event("error", "Only Windows automatic download is supported currently.")
+            print_event(
+                "error", "Only Windows automatic download is supported currently."
+            )
             sys.exit(1)
 
     # Download the full llama.cpp source for convert_hf_to_gguf.py + conversion module.
@@ -161,7 +169,10 @@ def ensure_llama_cpp(bin_dir: Path):
         if cached is not None:
             convert_py = cached
         else:
-            print_event("info", f"Downloading llama.cpp source ({ref}) for conversion scripts...")
+            print_event(
+                "info",
+                f"Downloading llama.cpp source ({ref}) for conversion scripts...",
+            )
             url = f"https://github.com/ggml-org/llama.cpp/archive/{ref}.zip"
             src_zip = bin_dir / "llama_src.zip"
             _download_verified(url, src_zip, os.environ.get("LLAMA_CPP_SRC_SHA256"))
@@ -170,13 +181,15 @@ def ensure_llama_cpp(bin_dir: Path):
 
             convert_py = _find_file(bin_dir, "convert_hf_to_gguf.py")
             if convert_py is None:
-                print_event("error", "Could not find convert_hf_to_gguf.py after extraction.")
+                print_event(
+                    "error", "Could not find convert_hf_to_gguf.py after extraction."
+                )
                 sys.exit(1)
 
-    # Ensure gguf package is installed
-    try:
-        import gguf  # noqa: F401
-    except ImportError:
+    # Ensure gguf package is installed. `gguf` is a llama.cpp-side dependency
+    # that is not declared in pyproject.toml, so probe for it by spec rather
+    # than importing it (an import statement would not resolve for type checking).
+    if importlib.util.find_spec("gguf") is None:
         print_event("info", "Installing gguf python package...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "gguf"])
 
@@ -190,20 +203,29 @@ def load_optimal_trial_and_merge(model_name: str) -> str:
 
     # Must match how main.py names the file, or no checkpoint is ever found.
     sanitized = checkpoint_name_for_model(model_name)
-    checkpoint_path = Path(__file__).parent.parent / "checkpoints" / f"{sanitized}.jsonl"
+    checkpoint_path = (
+        Path(__file__).parent.parent / "checkpoints" / f"{sanitized}.jsonl"
+    )
 
     if not checkpoint_path.exists():
-        print_event("error", f"Error: {model_name} is not a directory, and no checkpoint was found.")
+        print_event(
+            "error",
+            f"Error: {model_name} is not a directory, and no checkpoint was found.",
+        )
         sys.exit(1)
 
-    print_event("info", f"Found completed runs for {model_name}. Reconstructing optimal trial...")
+    print_event(
+        "info",
+        f"Found completed runs for {model_name}. Reconstructing optimal trial...",
+    )
 
-    from src.annihilate.model import Model, AbliterationParameters
-    from src.annihilate.export import read_trial_attributes, settings_from_checkpoint
-    from src.annihilate.system import empty_cache
-    from src.annihilate.utils import load_prompts
     import torch
     import torch.nn.functional as F
+
+    from src.annihilate.export import read_trial_attributes, settings_from_checkpoint
+    from src.annihilate.model import AbliterationParameters, Model
+    from src.annihilate.system import empty_cache
+    from src.annihilate.utils import load_prompts
 
     # Reconstructing a trial under different settings silently produces a
     # different model, so reuse the settings the study was run with (including
@@ -222,13 +244,13 @@ def load_optimal_trial_and_merge(model_name: str) -> str:
 
     best_trial_params = None
     best_direction_index = None
-    best_kl = float('inf')
-    best_refusals = float('inf')
+    best_kl = float("inf")
+    best_refusals = float("inf")
     best_trial_id = -1
 
     for trial_id, attrs in trials.items():
-        refusals = attrs.get("refusals", float('inf'))
-        kl = attrs.get("kl_divergence", float('inf'))
+        refusals = attrs.get("refusals", float("inf"))
+        kl = attrs.get("kl_divergence", float("inf"))
 
         if refusals < best_refusals or (refusals == best_refusals and kl < best_kl):
             best_refusals = refusals
@@ -238,17 +260,22 @@ def load_optimal_trial_and_merge(model_name: str) -> str:
             best_trial_id = trial_id
 
     if not best_trial_params:
-        print_event("error", f"Could not find any successful trials in {checkpoint_path}")
+        print_event(
+            "error", f"Could not find any successful trials in {checkpoint_path}"
+        )
         sys.exit(1)
-        
-    print_event("info", f"Selected Trial {best_trial_id} ({best_refusals} refusals, KL Div: {best_kl:.4f}). Loading base model...")
-    
+
+    print_event(
+        "info",
+        f"Selected Trial {best_trial_id} ({best_refusals} refusals, KL Div: {best_kl:.4f}). Loading base model...",
+    )
+
     model = Model(settings)
 
     print_event("info", "Calculating refusal directions...")
     if settings.batch_size == 0:
         settings.batch_size = 16
-        
+
     good_prompts = load_prompts(settings, settings.good_prompts)
     bad_prompts = load_prompts(settings, settings.bad_prompts)
 
@@ -260,29 +287,32 @@ def load_optimal_trial_and_merge(model_name: str) -> str:
     if settings.orthogonalize_direction:
         good_directions = F.normalize(good_means, p=2, dim=1)
         projection_vector = torch.sum(refusal_directions * good_directions, dim=1)
-        refusal_directions = refusal_directions - projection_vector.unsqueeze(1) * good_directions
+        refusal_directions = (
+            refusal_directions - projection_vector.unsqueeze(1) * good_directions
+        )
         refusal_directions = F.normalize(refusal_directions, p=2, dim=1)
 
     print_event("info", "Applying abliteration parameters...")
     parameters = {k: AbliterationParameters(**v) for k, v in best_trial_params.items()}
     model.abliterate(refusal_directions, best_direction_index, parameters)
-    
+
     print_event("info", "Merging model...")
     merged = model.get_merged_model()
-    
+
     out_dir = Path(__file__).parent / f"gguf_tmp_export_{sanitized}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    
-    print_event("info", f"Saving merged model to temporary folder for conversion...")
+
+    print_event("info", "Saving merged model to temporary folder for conversion...")
     merged.save_pretrained(out_dir, max_shard_size="10GB")
     model.tokenizer.save_pretrained(out_dir)
-    if getattr(model, "processor", None) is not None:
-        model.processor.save_pretrained(out_dir)
-        
+    processor = getattr(model, "processor", None)
+    if processor is not None:
+        processor.save_pretrained(out_dir)
+
     del merged
     del model
     empty_cache()
-    
+
     return str(out_dir)
 
 
@@ -318,13 +348,13 @@ def convert_to_gguf(model_path: str, quant_type: str, output_path: str):
         # that broke the move/cleanup below.
         print_event("info", f"Converting {model_path} to F16 GGUF...")
         f16_gguf = str(Path(output_path).with_suffix("")) + "-F16.gguf"
-    
+
         # Run convert_hf_to_gguf.py from its own directory so it can find the
         # sibling `conversion` package, and set NO_LOCAL_GGUF so it uses the
         # pip-installed gguf package instead of a local gguf-py/ directory.
         env = os.environ.copy()
         env["NO_LOCAL_GGUF"] = "1"
-    
+
         cmd = [
             sys.executable,
             str(convert_py),
@@ -334,7 +364,7 @@ def convert_to_gguf(model_path: str, quant_type: str, output_path: str):
             "--outtype",
             "f16",
         ]
-    
+
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -350,25 +380,30 @@ def convert_to_gguf(model_path: str, quant_type: str, output_path: str):
         if returncode != 0 or not os.path.exists(f16_gguf):
             print_event("error", "Conversion to F16 GGUF failed.")
             sys.exit(1)
-    
+
         if quant_type.upper() == "F16":
             shutil.move(f16_gguf, output_path)
             print_event("info", f"GGUF conversion complete: {output_path}")
             return
-    
+
         # 2. Quantize from F16 to the target type
         print_event("info", f"Quantizing to {quant_type}...")
         cmd = [str(quantize_exe), f16_gguf, output_path, quant_type]
-    
+
         proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace"
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         returncode = _stream_output(proc)
 
         if returncode != 0:
             print_event("error", "Quantization failed.")
             sys.exit(1)
-    
+
         # Cleanup intermediate F16 file
         os.remove(f16_gguf)
         print_event("info", f"GGUF quantization complete: {output_path}")
@@ -390,4 +425,3 @@ if __name__ == "__main__":
     except Exception as e:
         print_event("error", str(e))
         sys.exit(1)
-

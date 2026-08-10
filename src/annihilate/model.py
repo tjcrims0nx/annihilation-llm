@@ -590,6 +590,7 @@ class Model:
                         # This cast is always valid. Type inference fails here because the
                         # bnb.functional module is not found by ty for some reason.
                         import bitsandbytes as bnb
+
                         W = cast(
                             Tensor,
                             bnb.functional.dequantize_4bit(  # ty: ignore[possibly-missing-submodule]
