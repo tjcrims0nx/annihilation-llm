@@ -374,8 +374,12 @@ impl SubprocessManager {
                     let (stx, srx) = mpsc::channel::<String>();
                     thread::spawn(move || {
                         while let Ok(input) = srx.recv() {
-                            if stdin.write_all(input.as_bytes()).is_err() { break; }
-                            if stdin.write_all(b"\n").is_err() { break; }
+                            if stdin.write_all(input.as_bytes()).is_err() {
+                                break;
+                            }
+                            if stdin.write_all(b"\n").is_err() {
+                                break;
+                            }
                             let _ = stdin.flush();
                         }
                     });
@@ -384,11 +388,22 @@ impl SubprocessManager {
                     None
                 };
 
-                Self { rx, child: Some(child), stdin_tx }
+                Self {
+                    rx,
+                    child: Some(child),
+                    stdin_tx,
+                }
             }
             Err(e) => {
-                let _ = tx.send(SubprocessMessage::SpawnError(format!("Failed to start GGUF conversion: {}", e)));
-                Self { rx, child: None, stdin_tx: None }
+                let _ = tx.send(SubprocessMessage::SpawnError(format!(
+                    "Failed to start GGUF conversion: {}",
+                    e
+                )));
+                Self {
+                    rx,
+                    child: None,
+                    stdin_tx: None,
+                }
             }
         }
     }
@@ -456,8 +471,12 @@ impl SubprocessManager {
                     let (stx, srx) = mpsc::channel::<String>();
                     thread::spawn(move || {
                         while let Ok(input) = srx.recv() {
-                            if stdin.write_all(input.as_bytes()).is_err() { break; }
-                            if stdin.write_all(b"\n").is_err() { break; }
+                            if stdin.write_all(input.as_bytes()).is_err() {
+                                break;
+                            }
+                            if stdin.write_all(b"\n").is_err() {
+                                break;
+                            }
                             let _ = stdin.flush();
                         }
                     });
@@ -466,16 +485,25 @@ impl SubprocessManager {
                     None
                 };
 
-                Self { rx, child: Some(child), stdin_tx }
+                Self {
+                    rx,
+                    child: Some(child),
+                    stdin_tx,
+                }
             }
             Err(e) => {
-                let _ = tx.send(SubprocessMessage::SpawnError(format!("Failed to start chat server: {}", e)));
-                Self { rx, child: None, stdin_tx: None }
+                let _ = tx.send(SubprocessMessage::SpawnError(format!(
+                    "Failed to start chat server: {}",
+                    e
+                )));
+                Self {
+                    rx,
+                    child: None,
+                    stdin_tx: None,
+                }
             }
         }
     }
-
-
 
     /// Spawns the python benchmark script
     pub fn spawn_benchmark(model_name: &str) -> Self {
@@ -535,11 +563,22 @@ impl SubprocessManager {
                     });
                 }
 
-                Self { rx, child: Some(child), stdin_tx: None }
+                Self {
+                    rx,
+                    child: Some(child),
+                    stdin_tx: None,
+                }
             }
             Err(e) => {
-                let _ = tx.send(SubprocessMessage::SpawnError(format!("Failed to start benchmark: {}", e)));
-                Self { rx, child: None, stdin_tx: None }
+                let _ = tx.send(SubprocessMessage::SpawnError(format!(
+                    "Failed to start benchmark: {}",
+                    e
+                )));
+                Self {
+                    rx,
+                    child: None,
+                    stdin_tx: None,
+                }
             }
         }
     }

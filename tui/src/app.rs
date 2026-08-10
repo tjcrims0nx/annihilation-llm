@@ -112,7 +112,10 @@ fn persist_hf_token(token: Option<&str>) -> std::io::Result<()> {
 fn delete_checkpoint(model: &str) -> std::io::Result<bool> {
     let path = crate::subprocess::repo_root()
         .join("checkpoints")
-        .join(format!("{}.jsonl", crate::subprocess::checkpoint_name(model)));
+        .join(format!(
+            "{}.jsonl",
+            crate::subprocess::checkpoint_name(model)
+        ));
     match std::fs::remove_file(&path) {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -555,7 +558,9 @@ impl App {
                             self.kl_history.push(kl_divergence);
                             self.refusal_history.push(refusals as f64);
 
-                            if self.best_refusals.is_none() || refusals < self.best_refusals.unwrap() {
+                            if self.best_refusals.is_none()
+                                || refusals < self.best_refusals.unwrap()
+                            {
                                 self.best_refusals = Some(refusals);
                                 self.best_kl = Some(kl_divergence);
                             } else if refusals == self.best_refusals.unwrap() {
@@ -716,29 +721,38 @@ impl App {
                                         self.status_message = "Chat ready.".to_string();
                                         self.chat_messages.push((
                                             "system".to_string(),
-                                            "Model loaded! Type a message and press Enter.".to_string(),
+                                            "Model loaded! Type a message and press Enter."
+                                                .to_string(),
                                         ));
                                     }
                                     Some("status") => {
-                                        if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
+                                        if let Some(content) =
+                                            json.get("content").and_then(|c| c.as_str())
+                                        {
                                             self.status_message = content.to_string();
-                                            self.chat_messages.push((
-                                                "system".to_string(),
-                                                content.to_string(),
-                                            ));
+                                            self.chat_messages
+                                                .push(("system".to_string(), content.to_string()));
                                         }
                                     }
                                     Some("token") => {
-                                        if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
+                                        if let Some(content) =
+                                            json.get("content").and_then(|c| c.as_str())
+                                        {
                                             // Append token to the last assistant message, or create one
                                             if let Some(last) = self.chat_messages.last_mut() {
                                                 if last.0 == "assistant" {
                                                     last.1.push_str(content);
                                                 } else {
-                                                    self.chat_messages.push(("assistant".to_string(), content.to_string()));
+                                                    self.chat_messages.push((
+                                                        "assistant".to_string(),
+                                                        content.to_string(),
+                                                    ));
                                                 }
                                             } else {
-                                                self.chat_messages.push(("assistant".to_string(), content.to_string()));
+                                                self.chat_messages.push((
+                                                    "assistant".to_string(),
+                                                    content.to_string(),
+                                                ));
                                             }
                                             self.chat_streaming = true;
                                         }
@@ -747,7 +761,9 @@ impl App {
                                         self.chat_streaming = false;
                                     }
                                     Some("error") => {
-                                        if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
+                                        if let Some(content) =
+                                            json.get("content").and_then(|c| c.as_str())
+                                        {
                                             self.chat_messages.push((
                                                 "system".to_string(),
                                                 format!("Error: {}", content),
@@ -796,27 +812,50 @@ impl App {
                             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
                                 match json.get("type").and_then(|t| t.as_str()) {
                                     Some("result") => {
-                                        let bench = json.get("benchmark").and_then(|b| b.as_str()).unwrap_or("unknown").to_string();
-                                        let metric = json.get("metric").and_then(|m| m.as_str()).unwrap_or("").to_string();
-                                        let value = json.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                        let bench = json
+                                            .get("benchmark")
+                                            .and_then(|b| b.as_str())
+                                            .unwrap_or("unknown")
+                                            .to_string();
+                                        let metric = json
+                                            .get("metric")
+                                            .and_then(|m| m.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        let value = json
+                                            .get("value")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
                                         self.benchmark_results.push((bench, metric, value));
                                     }
                                     Some("status") => {
-                                        if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
+                                        if let Some(content) =
+                                            json.get("content").and_then(|c| c.as_str())
+                                        {
                                             self.status_message = content.to_string();
-                                            self.log_lines.push((content.to_string(), LogLevel::Info));
+                                            self.log_lines
+                                                .push((content.to_string(), LogLevel::Info));
                                         }
                                     }
                                     Some("done") => {
                                         self.benchmark_running = false;
                                         self.status_message = "Benchmarks completed.".to_string();
-                                        if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
-                                            self.log_lines.push((content.to_string(), LogLevel::Success));
+                                        if let Some(content) =
+                                            json.get("content").and_then(|c| c.as_str())
+                                        {
+                                            self.log_lines
+                                                .push((content.to_string(), LogLevel::Success));
                                         }
                                     }
                                     Some("error") => {
-                                        if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
-                                            self.log_lines.push((format!("Benchmark error: {}", content), LogLevel::Error));
+                                        if let Some(content) =
+                                            json.get("content").and_then(|c| c.as_str())
+                                        {
+                                            self.log_lines.push((
+                                                format!("Benchmark error: {}", content),
+                                                LogLevel::Error,
+                                            ));
                                             self.status_message = "Benchmark failed.".to_string();
                                         }
                                         self.benchmark_running = false;
@@ -834,7 +873,8 @@ impl App {
                     }
                     SubprocessMessage::SpawnError(err) => {
                         self.benchmark_running = false;
-                        self.log_lines.push((format!("Benchmark error: {}", err), LogLevel::Error));
+                        self.log_lines
+                            .push((format!("Benchmark error: {}", err), LogLevel::Error));
                     }
                 }
             }
@@ -1051,7 +1091,7 @@ impl App {
                                 }
                             }
                         }
-                        
+
                         if models.is_empty() {
                             self.status_message = "No completed models found.".to_string();
                         } else {
@@ -1060,7 +1100,8 @@ impl App {
                                 .into_iter()
                                 .map(|m| MenuItem::new(&m, "Select to convert to GGUF"))
                                 .collect();
-                            self.current_menu.push(MenuItem::new("Back", "Return to main menu").with_key("Esc"));
+                            self.current_menu
+                                .push(MenuItem::new("Back", "Return to main menu").with_key("Esc"));
                             self.menu_state.select(Some(0));
                         }
                     }
@@ -1078,8 +1119,13 @@ impl App {
                             MenuItem::new(
                                 "OBLITERATUS Advanced",
                                 "Gaussian kernel, COSMIC selection, and MoE EGA",
-                            ).with_key("O"),
-                            MenuItem::new("Set HF Token", "Required for private models or uploading to Hub").with_key("T"),
+                            )
+                            .with_key("O"),
+                            MenuItem::new(
+                                "Set HF Token",
+                                "Required for private models or uploading to Hub",
+                            )
+                            .with_key("T"),
                             MenuItem::new("Back", "Return to main menu").with_key("Esc"),
                         ];
                         self.menu_state.select(Some(0));
@@ -1110,9 +1156,12 @@ impl App {
                     self.screen = Screen::TrialActions;
                     self.current_menu = vec![
                         MenuItem::new("Chat with Model", "Test the decensored model").with_key("C"),
-                        MenuItem::new("Run Benchmarks", "Evaluate with MMLU, GSM8K, etc.").with_key("B"),
-                        MenuItem::new("Convert to GGUF", "Export as a quantized GGUF file").with_key("G"),
-                        MenuItem::new("Upload to Hugging Face", "Push model to HF Hub").with_key("U"),
+                        MenuItem::new("Run Benchmarks", "Evaluate with MMLU, GSM8K, etc.")
+                            .with_key("B"),
+                        MenuItem::new("Convert to GGUF", "Export as a quantized GGUF file")
+                            .with_key("G"),
+                        MenuItem::new("Upload to Hugging Face", "Push model to HF Hub")
+                            .with_key("U"),
                         MenuItem::new("Delete Model", "Remove the checkpoint").with_key("D"),
                         MenuItem::new("Back", "Return to Completed Models").with_key("Esc"),
                     ];
@@ -1176,7 +1225,11 @@ impl App {
 
     fn handle_model_input_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Char('v') | KeyCode::Char('V') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char('v') | KeyCode::Char('V')
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                     if let Ok(text) = clipboard.get_text() {
                         self.handle_paste(text);
@@ -1187,7 +1240,11 @@ impl App {
                     self.model_error = Some("Host clipboard not accessible here! Use Ctrl+Shift+V or Right-Click instead.".to_string());
                 }
             }
-            KeyCode::Insert if key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) => {
+            KeyCode::Insert
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::SHIFT) =>
+            {
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                     if let Ok(text) = clipboard.get_text() {
                         self.handle_paste(text);
@@ -1224,11 +1281,13 @@ impl App {
             }
             KeyCode::Char(c) => {
                 self.model_error = None;
-                self.model_cursor = insert_at_char_cursor(&mut self.model_input, self.model_cursor, c);
+                self.model_cursor =
+                    insert_at_char_cursor(&mut self.model_input, self.model_cursor, c);
             }
             KeyCode::Backspace => {
                 self.model_error = None;
-                self.model_cursor = remove_before_char_cursor(&mut self.model_input, self.model_cursor);
+                self.model_cursor =
+                    remove_before_char_cursor(&mut self.model_input, self.model_cursor);
             }
             KeyCode::Left => {
                 if self.model_cursor > 0 {
@@ -1261,7 +1320,7 @@ impl App {
         // We use curl because it avoids python SSL certificate issues common in WSL, and is native to Win10+/Linux/Mac.
         let dev_null = if cfg!(windows) { "NUL" } else { "/dev/null" };
         let url = format!("https://huggingface.co/api/models/{}", model);
-        
+
         let output = std::process::Command::new("curl")
             .args(["-m", "5", "-s", "-o", dev_null, "-w", "%{http_code}", &url])
             .output();
@@ -1285,11 +1344,13 @@ impl App {
         if self.screen == Screen::ModelInput {
             self.model_error = None;
             for c in clean.chars() {
-                self.model_cursor = insert_at_char_cursor(&mut self.model_input, self.model_cursor, c);
+                self.model_cursor =
+                    insert_at_char_cursor(&mut self.model_input, self.model_cursor, c);
             }
         } else if self.screen == Screen::TokenInput {
             for c in clean.chars() {
-                self.hf_token_cursor = insert_at_char_cursor(&mut self.hf_token_input, self.hf_token_cursor, c);
+                self.hf_token_cursor =
+                    insert_at_char_cursor(&mut self.hf_token_input, self.hf_token_cursor, c);
             }
         }
     }
@@ -1356,29 +1417,49 @@ impl App {
 
     fn handle_token_input_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Char('v') | KeyCode::Char('V') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char('v') | KeyCode::Char('V')
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                     if let Ok(text) = clipboard.get_text() {
                         let clean = text.replace('\n', "").replace('\r', "");
                         for c in clean.chars() {
-                            self.hf_token_cursor = insert_at_char_cursor(&mut self.hf_token_input, self.hf_token_cursor, c);
+                            self.hf_token_cursor = insert_at_char_cursor(
+                                &mut self.hf_token_input,
+                                self.hf_token_cursor,
+                                c,
+                            );
                         }
                     }
                 }
             }
-            KeyCode::Insert if key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) => {
+            KeyCode::Insert
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::SHIFT) =>
+            {
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                     if let Ok(text) = clipboard.get_text() {
                         let clean = text.replace('\n', "").replace('\r', "");
                         for c in clean.chars() {
-                            self.hf_token_cursor = insert_at_char_cursor(&mut self.hf_token_input, self.hf_token_cursor, c);
+                            self.hf_token_cursor = insert_at_char_cursor(
+                                &mut self.hf_token_input,
+                                self.hf_token_cursor,
+                                c,
+                            );
                         }
                     }
                 }
             }
             KeyCode::Enter => {
                 let token = self.hf_token_input.trim().to_string();
-                let token_opt = if token.is_empty() { None } else { Some(token.as_str()) };
+                let token_opt = if token.is_empty() {
+                    None
+                } else {
+                    Some(token.as_str())
+                };
                 unsafe {
                     match token_opt {
                         Some(t) => std::env::set_var("HF_TOKEN", t),
@@ -1392,7 +1473,7 @@ impl App {
                     Ok(()) => "HuggingFace token cleared.".to_string(),
                     Err(e) => format!("Token set for this session, but .env write failed: {e}"),
                 };
-                
+
                 // Go back to config select
                 self.screen = Screen::ConfigSelect;
                 self.current_menu = vec![
@@ -1406,8 +1487,13 @@ impl App {
                     MenuItem::new(
                         "OBLITERATUS Advanced",
                         "Gaussian kernel, COSMIC selection, and MoE EGA",
-                    ).with_key("O"),
-                    MenuItem::new("Set HF Token", "Required for private models or uploading to Hub").with_key("T"),
+                    )
+                    .with_key("O"),
+                    MenuItem::new(
+                        "Set HF Token",
+                        "Required for private models or uploading to Hub",
+                    )
+                    .with_key("T"),
                     MenuItem::new("Back", "Return to main menu").with_key("Esc"),
                 ];
                 self.menu_state.select(Some(5));
@@ -1425,17 +1511,24 @@ impl App {
                     MenuItem::new(
                         "OBLITERATUS Advanced",
                         "Gaussian kernel, COSMIC selection, and MoE EGA",
-                    ).with_key("O"),
-                    MenuItem::new("Set HF Token", "Required for private models or uploading to Hub").with_key("T"),
+                    )
+                    .with_key("O"),
+                    MenuItem::new(
+                        "Set HF Token",
+                        "Required for private models or uploading to Hub",
+                    )
+                    .with_key("T"),
                     MenuItem::new("Back", "Return to main menu").with_key("Esc"),
                 ];
                 self.menu_state.select(Some(5));
             }
             KeyCode::Char(c) => {
-                self.hf_token_cursor = insert_at_char_cursor(&mut self.hf_token_input, self.hf_token_cursor, c);
+                self.hf_token_cursor =
+                    insert_at_char_cursor(&mut self.hf_token_input, self.hf_token_cursor, c);
             }
             KeyCode::Backspace => {
-                self.hf_token_cursor = remove_before_char_cursor(&mut self.hf_token_input, self.hf_token_cursor);
+                self.hf_token_cursor =
+                    remove_before_char_cursor(&mut self.hf_token_input, self.hf_token_cursor);
             }
             KeyCode::Left => {
                 if self.hf_token_cursor > 0 {
@@ -1479,12 +1572,21 @@ impl App {
                 // Bounds checking will happen in draw loop
             }
             KeyCode::Char('c') | KeyCode::Char('C') => {
-                let log_text = self.log_lines.iter().map(|(msg, _)| msg.clone()).collect::<Vec<String>>().join("\n");
+                let log_text = self
+                    .log_lines
+                    .iter()
+                    .map(|(msg, _)| msg.clone())
+                    .collect::<Vec<String>>()
+                    .join("\n");
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                     let _ = clipboard.set_text(log_text);
-                    self.log_lines.push(("Copied entire log to clipboard!".to_string(), LogLevel::Success));
+                    self.log_lines.push((
+                        "Copied entire log to clipboard!".to_string(),
+                        LogLevel::Success,
+                    ));
                 } else {
-                    self.log_lines.push(("Failed to access clipboard.".to_string(), LogLevel::Error));
+                    self.log_lines
+                        .push(("Failed to access clipboard.".to_string(), LogLevel::Error));
                 }
             }
             _ => {}
@@ -1545,7 +1647,10 @@ impl App {
                         "Save Model Locally" => {
                             self.screen = Screen::Export;
                             self.current_menu = vec![
-                                MenuItem::new("Merge and export full model", "Requires sufficient RAM"),
+                                MenuItem::new(
+                                    "Merge and export full model",
+                                    "Requires sufficient RAM",
+                                ),
                                 MenuItem::new(
                                     "Export adapter only",
                                     "Can be merged later, smaller file",
@@ -1557,7 +1662,8 @@ impl App {
                         }
                         "Upload to Hugging Face" => {
                             self.screen = Screen::TokenInput;
-                            self.status_message = "Enter your Hugging Face token to upload the model.".to_string();
+                            self.status_message =
+                                "Enter your Hugging Face token to upload the model.".to_string();
                         }
                         "Chat with Model" => {
                             self.screen = Screen::Chat;
@@ -1570,22 +1676,31 @@ impl App {
                                 "system".to_string(),
                                 "Starting chat server... Reconstructing annihilated model from checkpoint.".to_string(),
                             ));
-                            self.chat_subprocess = Some(SubprocessManager::spawn_chat_server(&self.model_input));
+                            self.chat_subprocess =
+                                Some(SubprocessManager::spawn_chat_server(&self.model_input));
                         }
                         "Run Benchmarks" => {
                             self.screen = Screen::BenchmarkDashboard;
                             self.benchmark_running = true;
                             self.benchmark_results.clear();
                             self.log_lines.clear();
-                            self.log_lines.push(("Starting benchmarks on annihilated model...".to_string(), LogLevel::Info));
-                            self.benchmark_subprocess = Some(SubprocessManager::spawn_benchmark(&self.model_input));
-                            self.status_message = "Running benchmarks... This may take a while.".to_string();
+                            self.log_lines.push((
+                                "Starting benchmarks on annihilated model...".to_string(),
+                                LogLevel::Info,
+                            ));
+                            self.benchmark_subprocess =
+                                Some(SubprocessManager::spawn_benchmark(&self.model_input));
+                            self.status_message =
+                                "Running benchmarks... This may take a while.".to_string();
                         }
                         "Run More Trials" => { /* More trials */ }
                         "Convert to GGUF" => {
                             self.screen = Screen::GgufSizeSelect;
                             self.current_menu = vec![
-                                MenuItem::new("Q4_K_M", "Good balance of quality and size (recommended)"),
+                                MenuItem::new(
+                                    "Q4_K_M",
+                                    "Good balance of quality and size (recommended)",
+                                ),
                                 MenuItem::new("Q8_0", "Near-perfect quality, larger size"),
                                 MenuItem::new("F16", "Unquantized, maximum quality"),
                                 MenuItem::new("Back", "Return to export options").with_key("Esc"),
@@ -1617,7 +1732,11 @@ impl App {
             }
             KeyCode::Esc => {
                 // Determine context-aware escape:
-                if self.current_menu.iter().any(|m| m.label == "Back to Results") {
+                if self
+                    .current_menu
+                    .iter()
+                    .any(|m| m.label == "Back to Results")
+                {
                     self.switch_to_results();
                 } else {
                     self.go_back_to_splash();
@@ -1640,14 +1759,18 @@ impl App {
                     // and the reply streaming in.
                     self.chat_auto_scroll = true;
 
-                    let chat_history: Vec<serde_json::Value> = self.chat_messages.iter()
+                    let chat_history: Vec<serde_json::Value> = self
+                        .chat_messages
+                        .iter()
                         .filter(|(role, _)| role == "user" || role == "assistant")
-                        .map(|(role, content)| {
-                            serde_json::json!({"role": role, "content": content})
-                        })
+                        .map(
+                            |(role, content)| serde_json::json!({"role": role, "content": content}),
+                        )
                         .collect();
 
-                    let mut full_chat = vec![serde_json::json!({"role": "system", "content": "You are a helpful assistant."})]; 
+                    let mut full_chat = vec![
+                        serde_json::json!({"role": "system", "content": "You are a helpful assistant."}),
+                    ];
                     full_chat.extend(chat_history);
 
                     if let Some(ref proc) = self.chat_subprocess {
@@ -1661,7 +1784,10 @@ impl App {
                             ));
                         }
                     } else {
-                        self.chat_messages.push(("system".to_string(), "Chat server not running. Press Esc and try again.".to_string()));
+                        self.chat_messages.push((
+                            "system".to_string(),
+                            "Chat server not running. Press Esc and try again.".to_string(),
+                        ));
                     }
                 }
             }
@@ -1790,13 +1916,13 @@ impl App {
                         return;
                     }
                 }
-                
+
                 self.is_processing = true;
                 self.log_lines.clear();
                 let msg = format!("Starting GGUF conversion (Size: {})...", self.gguf_size);
                 self.log_lines.push((msg, LogLevel::Info));
                 self.screen = Screen::Processing;
-                
+
                 // Spawn the subprocess using the gguf converter script
                 // We'll pass the model input name for now as a placeholder
                 self.gguf_output = Some(crate::subprocess::gguf_output_path(
@@ -2097,9 +2223,7 @@ impl App {
             Screen::Export => {
                 self.render_menu_screen(frame, area, "EXPORT MODEL", "Choose export strategy:")
             }
-            Screen::GgufSizeSelect => {
-                self.render_gguf_splash(frame, area)
-            }
+            Screen::GgufSizeSelect => self.render_gguf_splash(frame, area),
             Screen::CheckpointPrompt => {
                 self.render_menu_screen(
                     frame,
@@ -2445,36 +2569,54 @@ impl App {
                 Span::styled("Trials: ", Style::default().fg(theme::TEXT_DIM)),
                 Span::styled(
                     format!("{}", self.total_trials),
-                    Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme::TEXT_PRIMARY)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]),
             Line::from(vec![
                 Span::styled("Quantization: ", Style::default().fg(theme::TEXT_DIM)),
                 Span::styled(
                     if self.quantize { "4-bit (bnb)" } else { "None" },
-                    Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme::TEXT_PRIMARY)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]),
             Line::from(vec![
                 Span::styled("OBLITERATUS: ", Style::default().fg(theme::TEXT_DIM)),
                 Span::styled(
-                    if self.use_obliteratus { "Enabled" } else { "Disabled" },
-                    Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                    if self.use_obliteratus {
+                        "Enabled"
+                    } else {
+                        "Disabled"
+                    },
+                    Style::default()
+                        .fg(theme::TEXT_PRIMARY)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]),
             Line::from(vec![
                 Span::styled("Target GGUF: ", Style::default().fg(theme::TEXT_DIM)),
                 Span::styled(
                     &self.gguf_size,
-                    Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme::TEXT_PRIMARY)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]),
             Line::from(""),
             Line::from(vec![
                 Span::styled("Model: ", Style::default().fg(theme::TEXT_DIM)),
                 Span::styled(
-                    if self.model_input.is_empty() { "Not selected" } else { &self.model_input },
-                    Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD),
+                    if self.model_input.is_empty() {
+                        "Not selected"
+                    } else {
+                        &self.model_input
+                    },
+                    Style::default()
+                        .fg(theme::NEON_CYAN)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]),
         ];
@@ -2629,7 +2771,7 @@ impl App {
 
         // Input Box
         let inner_input_area = centered_rect_fixed(60, 3, chunks[1]);
-        
+
         let display_text = if self.hf_token_input.is_empty() {
             "e.g. hf_AbcDefGhiJklMnoPqrStuVwxYz...".to_string()
         } else {
@@ -2645,15 +2787,13 @@ impl App {
                 .add_modifier(Modifier::BOLD)
         };
 
-        let input_block = Paragraph::new(display_text)
-            .style(input_style)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Double)
-                    .border_style(Style::default().fg(theme::NEON_AMBER))
-                    .title(Span::styled(" Access Token ", theme::warning_style())),
-            );
+        let input_block = Paragraph::new(display_text).style(input_style).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Double)
+                .border_style(Style::default().fg(theme::NEON_AMBER))
+                .title(Span::styled(" Access Token ", theme::warning_style())),
+        );
 
         frame.render_widget(input_block, inner_input_area);
 
@@ -2666,19 +2806,30 @@ impl App {
             Line::from(""),
             Line::from(vec![
                 Span::styled("1. ", Style::default().fg(theme::NEON_CYAN)),
-                Span::styled("Download private/gated models (Read permissions).", theme::dim_style()),
+                Span::styled(
+                    "Download private/gated models (Read permissions).",
+                    theme::dim_style(),
+                ),
             ]),
             Line::from(vec![
                 Span::styled("2. ", Style::default().fg(theme::NEON_CYAN)),
-                Span::styled("Upload your decensored model to the Hub (Write permissions).", theme::dim_style()),
+                Span::styled(
+                    "Upload your decensored model to the Hub (Write permissions).",
+                    theme::dim_style(),
+                ),
             ]),
             Line::from(""),
             Line::from(vec![
                 Span::styled("Get your token at: ", Style::default().fg(theme::TEXT_DIM)),
-                Span::styled("https://huggingface.co/settings/tokens", Style::default().fg(theme::NEON_BLUE).add_modifier(Modifier::UNDERLINED)),
+                Span::styled(
+                    "https://huggingface.co/settings/tokens",
+                    Style::default()
+                        .fg(theme::NEON_BLUE)
+                        .add_modifier(Modifier::UNDERLINED),
+                ),
             ]),
         ];
-        
+
         let info_para = Paragraph::new(info_text)
             .alignment(Alignment::Center)
             .block(
@@ -3149,7 +3300,7 @@ impl App {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3), // title
+                Constraint::Length(3),      // title
                 Constraint::Percentage(40), // results table
                 Constraint::Percentage(60), // logs
             ])
@@ -3161,9 +3312,10 @@ impl App {
         } else {
             format!(" 📊 BENCHMARKING: {} (Completed)", self.model_input)
         };
-        let title = Paragraph::new(Line::from(vec![
-            Span::styled(title_text, theme::title_style()),
-        ]))
+        let title = Paragraph::new(Line::from(vec![Span::styled(
+            title_text,
+            theme::title_style(),
+        )]))
         .alignment(Alignment::Center)
         .block(
             Block::default()
@@ -3183,14 +3335,21 @@ impl App {
             .height(1)
             .bottom_margin(1);
 
-        let rows: Vec<Row> = self.benchmark_results.iter().map(|(bench, metric, value)| {
-            Row::new(vec![
-                Cell::from(Span::styled(bench, theme::highlight_value())),
-                Cell::from(metric.clone()),
-                Cell::from(Span::styled(value, Style::default().fg(theme::NEON_MAGENTA))),
-            ])
-            .height(1)
-        }).collect();
+        let rows: Vec<Row> = self
+            .benchmark_results
+            .iter()
+            .map(|(bench, metric, value)| {
+                Row::new(vec![
+                    Cell::from(Span::styled(bench, theme::highlight_value())),
+                    Cell::from(metric.clone()),
+                    Cell::from(Span::styled(
+                        value,
+                        Style::default().fg(theme::NEON_MAGENTA),
+                    )),
+                ])
+                .height(1)
+            })
+            .collect();
 
         let widths = [
             Constraint::Percentage(40),
@@ -3213,16 +3372,20 @@ impl App {
         frame.render_widget(results_table, chunks[1]);
 
         // Logs
-        let log_lines_ui: Vec<Line> = self.log_lines.iter().map(|(msg, level)| {
-            let style = match level {
-                LogLevel::Info => Style::default().fg(theme::TEXT_PRIMARY),
-                LogLevel::Success => Style::default().fg(theme::NEON_GREEN),
-                LogLevel::Warning => Style::default().fg(theme::NEON_AMBER),
-                LogLevel::Error => Style::default().fg(theme::NEON_RED),
-                LogLevel::Dim => theme::dim_style(),
-            };
-            Line::from(Span::styled(msg, style))
-        }).collect();
+        let log_lines_ui: Vec<Line> = self
+            .log_lines
+            .iter()
+            .map(|(msg, level)| {
+                let style = match level {
+                    LogLevel::Info => Style::default().fg(theme::TEXT_PRIMARY),
+                    LogLevel::Success => Style::default().fg(theme::NEON_GREEN),
+                    LogLevel::Warning => Style::default().fg(theme::NEON_AMBER),
+                    LogLevel::Error => Style::default().fg(theme::NEON_RED),
+                    LogLevel::Dim => theme::dim_style(),
+                };
+                Line::from(Span::styled(msg, style))
+            })
+            .collect();
 
         let log_len = log_lines_ui.len();
         let log_height = chunks[2].height.saturating_sub(2) as usize; // account for borders
@@ -3235,7 +3398,7 @@ impl App {
                 self.log_scroll = 0;
             }
         }
-        
+
         let max_scroll = log_len.saturating_sub(log_height);
         if self.log_scroll > max_scroll {
             self.log_scroll = max_scroll;
@@ -3371,11 +3534,8 @@ impl App {
         } else {
             "Press Enter to send · Esc to exit"
         };
-        let status = Paragraph::new(Line::from(Span::styled(
-            status_text,
-            theme::dim_style(),
-        )))
-        .alignment(Alignment::Center);
+        let status = Paragraph::new(Line::from(Span::styled(status_text, theme::dim_style())))
+            .alignment(Alignment::Center);
         frame.render_widget(status, chunks[3]);
 
         // Cursor
