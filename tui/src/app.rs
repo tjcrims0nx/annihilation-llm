@@ -3315,7 +3315,10 @@ impl App {
 
         // Info
         let info_text = vec![
-            Line::from(Span::styled("ANNIHILATE v1.4.3", theme::title_style())),
+            Line::from(Span::styled(
+                concat!("ANNIHILATE v", env!("ANNIHILATE_VERSION")),
+                theme::title_style(),
+            )),
             Line::from(""),
             Line::from(vec![
                 Span::styled("Author: ", Style::default().fg(theme::TEXT_DIM)),
