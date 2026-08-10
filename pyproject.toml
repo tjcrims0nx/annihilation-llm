@@ -43,7 +43,13 @@ dependencies = [
     "sentencepiece~=0.2",
     "tiktoken~=0.12",
     "tomli-w~=1.2",
-    "torchvision>=0.15",
+    # torch must be declared directly: [tool.uv.sources] only applies to direct
+    # dependencies, so when torch was merely transitive its index pin was ignored
+    # and it resolved to the CPU wheel from PyPI while torchvision came from the
+    # CUDA index. The mismatched pair fails at import with
+    # "operator torchvision::nms does not exist".
+    "torch>=2.13",
+    "torchvision>=0.28",
     "tqdm~=4.67",
     "transformers[kernels]~=5.6",
 ]
@@ -79,16 +85,19 @@ build-backend = "hatchling.build"
 [tool.uv]
 
 [[tool.uv.index]]
-name = "pytorch-cu121"
-url = "https://download.pytorch.org/whl/cu121"
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
+# Both packages must come from the same index. torch and torchvision ship
+# compiled extensions that link against each other's ABI, so a CPU torch with a
+# CUDA torchvision (or two different CUDA versions) fails at import.
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-cu121", marker = "sys_platform == 'win32'" }
+  { index = "pytorch-cu126", marker = "sys_platform == 'win32'" }
 ]
 torchvision = [
-  { index = "pytorch-cu121", marker = "sys_platform == 'win32'" }
+  { index = "pytorch-cu126", marker = "sys_platform == 'win32'" }
 ]
 
 [tool.hatch.build.targets.wheel]
