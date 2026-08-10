@@ -424,9 +424,10 @@ def get_package_version(name: str) -> str:
 def get_requirements_dict() -> dict[str, str]:
     """Recursively finds all direct and transitive dependencies of annihilate-llm and core libraries."""
 
-    # We start with annihilate-llm and the core compute libraries.
-    # PyTorch is not listed as a dependency in the annihilate-llm package
-    # because installation is hardware-specific and must be done manually.
+    # We start with annihilate-llm and the core compute libraries. torch and
+    # torchvision are declared dependencies; torchaudio is not, and the exact
+    # build (CPU/CUDA/ROCm) is hardware-specific, so seed all of them
+    # explicitly rather than relying on dependency resolution alone.
     packages_to_check = ["annihilate-llm", "torch", "torchaudio", "torchvision"]
 
     visited = set()
