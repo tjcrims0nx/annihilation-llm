@@ -155,7 +155,10 @@ impl SubprocessManager {
                     let tx_out = tx.clone();
                     thread::spawn(move || {
                         let reader = BufReader::new(stdout);
-                        for text in reader.lines().flatten() {
+                        // Stop on a read error rather than skipping it: `flatten()`
+                        // would spin this thread forever on a pipe that keeps
+                        // erroring. Every other reader here breaks; these two did not.
+                        for text in reader.lines().map_while(Result::ok) {
                             let event = parser::parse_line(&text);
                             let _ = tx_out.send(SubprocessMessage::Event(event));
                         }
@@ -166,7 +169,7 @@ impl SubprocessManager {
                     let tx_err = tx.clone();
                     thread::spawn(move || {
                         let reader = BufReader::new(stderr);
-                        for text in reader.lines().flatten() {
+                        for text in reader.lines().map_while(Result::ok) {
                             let event = parser::parse_line(&text);
                             let _ = tx_err.send(SubprocessMessage::Event(event));
                         }
@@ -641,11 +644,11 @@ impl SubprocessManager {
 
         // Also reap the child if it exited, avoiding zombie processes,
         // and instantly surface the exit code to the UI thread.
-        if let Some(ref mut child) = self.child {
-            if let Ok(Some(status)) = child.try_wait() {
-                messages.push(SubprocessMessage::Exited(status.code()));
-                self.child = None; // Clean up so we only emit Exited once
-            }
+        if let Some(ref mut child) = self.child
+            && let Ok(Some(status)) = child.try_wait()
+        {
+            messages.push(SubprocessMessage::Exited(status.code()));
+            self.child = None; // Clean up so we only emit Exited once
         }
 
         messages

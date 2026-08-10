@@ -18,7 +18,6 @@ use crate::parser::ParsedEvent;
 use crate::subprocess::SubprocessManager;
 use crate::sysinfo::SystemInfo;
 use crate::theme;
-use serde_json;
 
 // ─── ASCII Art Banner ──────────────────────────────────────────
 
@@ -162,10 +161,10 @@ fn model_name_from_checkpoint(path: &std::path::Path) -> String {
             .and_then(|v| v.as_str())
             .map(str::to_string);
 
-        if let Some(model) = model {
-            if !model.is_empty() {
-                return model;
-            }
+        if let Some(model) = model
+            && !model.is_empty()
+        {
+            return model;
         }
     }
 
@@ -256,7 +255,7 @@ fn wrapped_line_count(text: &str, width: usize) -> usize {
             if column == 0 {
                 // A word wider than the pane wraps onto further rows itself.
                 segment_lines += word_width.saturating_sub(1) / width;
-                column = if word_width % width == 0 && word_width > 0 {
+                column = if word_width.is_multiple_of(width) && word_width > 0 {
                     width
                 } else {
                     word_width % width
@@ -266,7 +265,7 @@ fn wrapped_line_count(text: &str, width: usize) -> usize {
             } else {
                 segment_lines += 1;
                 segment_lines += word_width.saturating_sub(1) / width;
-                column = if word_width % width == 0 && word_width > 0 {
+                column = if word_width.is_multiple_of(width) && word_width > 0 {
                     width
                 } else {
                     word_width % width
@@ -558,15 +557,13 @@ impl App {
                             self.kl_history.push(kl_divergence);
                             self.refusal_history.push(refusals as f64);
 
-                            if self.best_refusals.is_none()
-                                || refusals < self.best_refusals.unwrap()
-                            {
+                            if self.best_refusals.is_none_or(|best| refusals < best) {
                                 self.best_refusals = Some(refusals);
                                 self.best_kl = Some(kl_divergence);
-                            } else if refusals == self.best_refusals.unwrap() {
-                                if self.best_kl.is_none() || kl_divergence < self.best_kl.unwrap() {
-                                    self.best_kl = Some(kl_divergence);
-                                }
+                            } else if self.best_refusals == Some(refusals)
+                                && self.best_kl.is_none_or(|best| kl_divergence < best)
+                            {
+                                self.best_kl = Some(kl_divergence);
                             }
 
                             self.log_lines.push((
@@ -620,7 +617,7 @@ impl App {
                         ParsedEvent::Raw(line) => {
                             if !line.trim().is_empty() && !line.contains("Spawning") {
                                 let mut clean = line.clone();
-                                if let Some(final_chunk) = clean.split('\r').last() {
+                                if let Some(final_chunk) = clean.split('\r').next_back() {
                                     clean = final_chunk.to_string();
                                 }
                                 if clean.contains("No GPU or other accelerator detected")
@@ -1084,10 +1081,10 @@ impl App {
                         let mut models = Vec::new();
                         if let Ok(entries) = std::fs::read_dir(checkpoint_dir) {
                             for entry in entries.filter_map(|e| e.ok()) {
-                                if let Some(ext) = entry.path().extension() {
-                                    if ext == "jsonl" {
-                                        models.push(model_name_from_checkpoint(&entry.path()));
-                                    }
+                                if let Some(ext) = entry.path().extension()
+                                    && ext == "jsonl"
+                                {
+                                    models.push(model_name_from_checkpoint(&entry.path()));
                                 }
                             }
                         }
@@ -1213,7 +1210,7 @@ impl App {
                             self.menu_state.select(Some(0));
                         }
                     }
-                    Some(2) | _ => self.go_back_to_splash(),
+                    _ => self.go_back_to_splash(),
                 }
             }
             KeyCode::Esc => self.go_back_to_splash(),
@@ -1340,7 +1337,7 @@ impl App {
         false
     }
     pub fn handle_paste(&mut self, text: String) {
-        let clean = text.replace('\n', "").replace('\r', "");
+        let clean = text.replace(['\n', '\r'], "");
         if self.screen == Screen::ModelInput {
             self.model_error = None;
             for c in clean.chars() {
@@ -1422,16 +1419,16 @@ impl App {
                     .modifiers
                     .contains(crossterm::event::KeyModifiers::CONTROL) =>
             {
-                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                    if let Ok(text) = clipboard.get_text() {
-                        let clean = text.replace('\n', "").replace('\r', "");
-                        for c in clean.chars() {
-                            self.hf_token_cursor = insert_at_char_cursor(
-                                &mut self.hf_token_input,
-                                self.hf_token_cursor,
-                                c,
-                            );
-                        }
+                if let Ok(mut clipboard) = arboard::Clipboard::new()
+                    && let Ok(text) = clipboard.get_text()
+                {
+                    let clean = text.replace(['\n', '\r'], "");
+                    for c in clean.chars() {
+                        self.hf_token_cursor = insert_at_char_cursor(
+                            &mut self.hf_token_input,
+                            self.hf_token_cursor,
+                            c,
+                        );
                     }
                 }
             }
@@ -1440,16 +1437,16 @@ impl App {
                     .modifiers
                     .contains(crossterm::event::KeyModifiers::SHIFT) =>
             {
-                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                    if let Ok(text) = clipboard.get_text() {
-                        let clean = text.replace('\n', "").replace('\r', "");
-                        for c in clean.chars() {
-                            self.hf_token_cursor = insert_at_char_cursor(
-                                &mut self.hf_token_input,
-                                self.hf_token_cursor,
-                                c,
-                            );
-                        }
+                if let Ok(mut clipboard) = arboard::Clipboard::new()
+                    && let Ok(text) = clipboard.get_text()
+                {
+                    let clean = text.replace(['\n', '\r'], "");
+                    for c in clean.chars() {
+                        self.hf_token_cursor = insert_at_char_cursor(
+                            &mut self.hf_token_input,
+                            self.hf_token_cursor,
+                            c,
+                        );
                     }
                 }
             }
@@ -3485,10 +3482,9 @@ impl App {
 
         let max_scroll = total_lines.saturating_sub(inner_height);
 
-        // Follow the newest output unless the user has scrolled up to read back.
-        if self.chat_auto_scroll {
-            self.chat_scroll = max_scroll;
-        } else if self.chat_scroll > max_scroll {
+        // Follow the newest output unless the user has scrolled up to read back,
+        // and never leave the view scrolled past the end.
+        if self.chat_auto_scroll || self.chat_scroll > max_scroll {
             self.chat_scroll = max_scroll;
         }
 

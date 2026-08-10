@@ -43,18 +43,18 @@ impl SystemInfo {
             ])
             .output();
 
-        if let Ok(output) = output {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                // Output format: "NVIDIA GeForce RTX 4090, 1234, 24564"
-                let line = stdout.trim();
-                let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
-                if parts.len() >= 3 {
-                    self.gpu_name = parts[0].to_string();
-                    self.vram_used_mb = parts[1].parse().unwrap_or(0.0);
-                    self.vram_total_mb = parts[2].parse().unwrap_or(0.0);
-                    return;
-                }
+        if let Ok(output) = output
+            && output.status.success()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // Output format: "NVIDIA GeForce RTX 4090, 1234, 24564"
+            let line = stdout.trim();
+            let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+            if parts.len() >= 3 {
+                self.gpu_name = parts[0].to_string();
+                self.vram_used_mb = parts[1].parse().unwrap_or(0.0);
+                self.vram_total_mb = parts[2].parse().unwrap_or(0.0);
+                return;
             }
         }
 

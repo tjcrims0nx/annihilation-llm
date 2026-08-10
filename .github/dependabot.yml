@@ -13,6 +13,18 @@ updates:
     commit-message:
       prefix: "deps"
 
+  # Rust dependencies for the TUI
+  - package-ecosystem: "cargo"
+    directory: "/tui"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"

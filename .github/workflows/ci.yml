@@ -58,7 +58,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2.9.2
@@ -67,6 +67,9 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --locked --release --all-targets -- -D warnings
 
       # --locked so a stale Cargo.lock fails here rather than being silently
       # rewritten. build.rs also fails the build if tui/Cargo.toml and
