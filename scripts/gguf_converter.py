@@ -191,9 +191,53 @@ def ensure_llama_cpp(bin_dir: Path):
     # than importing it (an import statement would not resolve for type checking).
     if importlib.util.find_spec("gguf") is None:
         print_event("info", "Installing gguf python package...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "gguf"])
+        _install_package("gguf")
 
     return quantize_exe, convert_py
+
+
+def _install_package(package: str) -> None:
+    """Installs a package into the running interpreter's environment.
+
+    Environments created by `uv venv` (which is what `uv sync` builds, and what
+    the TUI picks first) do not ship pip, so `-m pip install` fails there with
+    "No module named pip". Try pip when it is actually importable, and otherwise
+    fall back to `uv pip install --python <this interpreter>`, which targets this
+    environment rather than whatever uv would infer on its own.
+    """
+
+    attempts: list[list[str]] = []
+
+    if importlib.util.find_spec("pip") is not None:
+        attempts.append([sys.executable, "-m", "pip", "install", package])
+
+    uv = shutil.which("uv")
+    if uv is not None:
+        attempts.append([uv, "pip", "install", "--python", sys.executable, package])
+
+    if not attempts:
+        print_event(
+            "error",
+            f"Cannot install {package}: this environment has no pip, and uv was "
+            f"not found on PATH. Install it manually with "
+            f"`uv pip install {package}`.",
+        )
+        sys.exit(1)
+
+    errors: list[str] = []
+
+    for command in attempts:
+        try:
+            subprocess.check_call(command)
+            return
+        except (subprocess.CalledProcessError, OSError) as e:
+            errors.append(f"{' '.join(command)} -> {e}")
+
+    # Report every attempt; a bare "returned non-zero exit status 1" gives no
+    # indication of which installer was tried or why it failed.
+    details = "; ".join(errors)
+    print_event("error", f"Failed to install {package}. Tried: {details}")
+    sys.exit(1)
 
 
 def load_optimal_trial_and_merge(model_name: str) -> str:
