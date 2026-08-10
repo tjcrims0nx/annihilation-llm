@@ -213,6 +213,22 @@ fn char_len(s: &str) -> usize {
     s.chars().count()
 }
 
+/// Human-readable byte count, e.g. `651 MiB` (or `752.3 KB` below 1 MiB).
+fn format_bytes(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = KIB * 1024;
+    const GIB: u64 = MIB * 1024;
+    if bytes >= GIB {
+        format!("{:.2} GiB", bytes as f64 / GIB as f64)
+    } else if bytes >= MIB {
+        format!("{:.0} MiB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.1} KiB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 /// Visual line count for `text` rendered into a pane `width` columns wide.
 ///
 /// Mirrors how `Paragraph` with `Wrap` lays text out, so scroll bounds can be
@@ -259,6 +275,29 @@ fn wrapped_line_count(text: &str, width: usize) -> usize {
     }
 
     lines.max(1)
+}
+
+/// Completion line for a child process exit, plus the level to style it at.
+///
+/// A clean exit is a success, not a warning: a finished GGUF conversion used to
+/// be reported in the same yellow as a crash, and printed the raw `Some(0)`
+/// debug form of the code. `None` means the process was killed before it could
+/// report a code, which is neither a success nor a reported failure.
+fn exit_report(what: &str, code: Option<i32>) -> (String, LogLevel) {
+    match code {
+        Some(0) => (
+            format!("✓ {what} completed successfully."),
+            LogLevel::Success,
+        ),
+        Some(code) => (
+            format!("{what} failed with exit code {code}."),
+            LogLevel::Error,
+        ),
+        None => (
+            format!("{what} was terminated before it reported an exit code."),
+            LogLevel::Warning,
+        ),
+    }
 }
 
 // ─── Menu System ───────────────────────────────────────────────
@@ -364,6 +403,10 @@ pub struct App {
     pub quantize: bool,
     pub use_obliteratus: bool,
     pub gguf_size: String,
+    /// Where an in-flight GGUF conversion is writing to, so its exit can be
+    /// checked against the real artifact. `None` when the running subprocess is
+    /// an optimization run rather than a conversion.
+    pub gguf_output: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -438,6 +481,7 @@ impl App {
             quantize: false,
             use_obliteratus: false,
             gguf_size: "Q4_K_M".to_string(),
+            gguf_output: None,
         }
     }
 
@@ -628,17 +672,14 @@ impl App {
                             } else {
                                 self.is_processing = false;
                                 self.is_setting_up = false;
-                                self.log_lines.push((
-                                    format!("Setup exited with code {:?}", code),
-                                    LogLevel::Warning,
-                                ));
+                                let (msg, level) = exit_report("Environment setup", code);
+                                self.log_lines.push((msg, level));
                             }
                         } else {
                             self.is_processing = false;
-                            self.log_lines.push((
-                                format!("Process exited with code {:?}", code),
-                                LogLevel::Warning,
-                            ));
+                            for (msg, level) in self.finish_report(code) {
+                                self.log_lines.push((msg, level));
+                            }
                             // Wait for user to manually exit or review logs rather than forcing them to the results screen
                         }
                     }
@@ -797,6 +838,54 @@ impl App {
                     }
                 }
             }
+        }
+    }
+
+    /// Lines to log when the main subprocess exits.
+    ///
+    /// A GGUF export is only called a success once the file it promised is
+    /// actually on disk. The converter shells out to `convert_hf_to_gguf.py`
+    /// and `llama-quantize`, so it can exit 0 after a step that quietly wrote
+    /// nothing — reporting that as done sends the user hunting for a model that
+    /// is not there.
+    fn finish_report(&mut self, code: Option<i32>) -> Vec<(String, LogLevel)> {
+        let Some(output) = self.gguf_output.take() else {
+            return vec![exit_report("Process", code)];
+        };
+
+        if code != Some(0) {
+            return vec![exit_report("GGUF conversion", code)];
+        }
+
+        match std::fs::metadata(&output) {
+            Ok(meta) if meta.len() > 0 => vec![
+                (
+                    "✓ GGUF conversion complete and verified.".to_string(),
+                    LogLevel::Success,
+                ),
+                (
+                    format!(
+                        "  Saved to {} ({})",
+                        output.display(),
+                        format_bytes(meta.len())
+                    ),
+                    LogLevel::Success,
+                ),
+            ],
+            Ok(_) => vec![(
+                format!(
+                    "GGUF conversion exited cleanly but wrote an empty file: {}",
+                    output.display()
+                ),
+                LogLevel::Error,
+            )],
+            Err(e) => vec![(
+                format!(
+                    "GGUF conversion exited cleanly but {} is missing: {e}",
+                    output.display()
+                ),
+                LogLevel::Error,
+            )],
         }
     }
 
@@ -1710,6 +1799,10 @@ impl App {
                 
                 // Spawn the subprocess using the gguf converter script
                 // We'll pass the model input name for now as a placeholder
+                self.gguf_output = Some(crate::subprocess::gguf_output_path(
+                    &self.model_input,
+                    &self.gguf_size,
+                ));
                 self.subprocess = Some(crate::subprocess::SubprocessManager::spawn_gguf_convert(
                     &self.model_input,
                     &self.gguf_size,
@@ -1892,6 +1985,10 @@ impl App {
             recent.truncate(5); // Keep top 5
             let _ = std::fs::write(&recent_file, recent.join("\n"));
         }
+
+        // Not a conversion; clear any target left over from an earlier export
+        // so this run's exit is not reported against a stale file.
+        self.gguf_output = None;
 
         self.subprocess = Some(SubprocessManager::spawn_setup(
             self.sys_info.gpu_name != "Unknown",

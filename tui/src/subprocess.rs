@@ -91,6 +91,17 @@ pub fn sanitize_model_name(model: &str) -> String {
     }
 }
 
+/// Path `spawn_gguf_convert` writes its export to.
+///
+/// Exposed separately so the UI can verify the artifact actually landed once
+/// the converter exits — a zero exit code on its own is not proof of a file.
+pub fn gguf_output_path(model_path: &str, quant_type: &str) -> PathBuf {
+    let sanitized = sanitize_model_name(model_path);
+    repo_root()
+        .join("exports")
+        .join(format!("{sanitized}-{quant_type}.gguf"))
+}
+
 /// Messages sent from the subprocess to the UI.
 #[derive(Debug)]
 pub enum SubprocessMessage {
@@ -301,10 +312,10 @@ impl SubprocessManager {
 
         let root = repo_root();
         let python = python_exe();
-        let sanitized = sanitize_model_name(model_path);
-        let output_dir = root.join("exports");
-        let _ = std::fs::create_dir_all(&output_dir);
-        let output_path = output_dir.join(format!("{sanitized}-{quant_type}.gguf"));
+        let output_path = gguf_output_path(model_path, quant_type);
+        if let Some(parent) = output_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
 
         let mut cmd = Command::new(&python);
         cmd.arg("-u");
