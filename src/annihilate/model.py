@@ -35,6 +35,38 @@ from .config import KernelType, QuantizationMethod, RowNormalization, Settings
 from .system import empty_cache
 from .utils import Prompt, batchify, format_exception, print
 
+# How many times more aligned with the refusal direction than chance an expert must
+# be before EGA applies the full intervention. Below this it is scaled down
+# proportionally, and an expert at chance alignment is left untouched.
+#
+# Expressed as a ratio to chance rather than an absolute one so it means the same
+# thing on every model; see `_ega_scale`. The value reproduces the behaviour of the
+# previous fixed multiplier at hidden size 4096, which is the width it happened to
+# be calibrated for.
+EGA_FULL_INTERVENTION_RATIO = 3.2
+
+
+def _ega_scale(lora_A: Tensor, W: Tensor) -> float:
+    """Scale factor for Expert-Granular Abliteration on one MoE expert.
+
+    Returns 1.0 for an expert strongly aligned with the refusal direction and
+    approaches 0.0 for one no better aligned than chance, so benign experts keep
+    their knowledge.
+
+    The raw ratio ``||v^T W|| / ||W||_F`` cannot be compared across models: for a
+    direction no more aligned than chance it sits at ``1/sqrt(d_out)``, so a fixed
+    multiplier scales an equally benign expert differently at every hidden size
+    (0.62 at 1024 but 0.23 at 8192, measured). Dividing by that baseline makes the
+    result dimensionless, with 1.0 meaning "no better than chance".
+    """
+    w_norm = torch.norm(W)
+    if w_norm <= 0:
+        return 1.0
+
+    chance = 1.0 / math.sqrt(W.shape[0])
+    alignment = (torch.norm(lora_A) / w_norm).item() / chance
+    return min(1.0, alignment / EGA_FULL_INTERVENTION_RATIO)
+
 
 class UnsupportedModelFormatError(ValueError):
     pass
@@ -617,16 +649,9 @@ class Model:
 
                     current_weight = weight
                     if getattr(self.settings, "use_ega", False) and len(modules) > 1:
-                        # MoE Expert-Granular Abliteration (EGA) heuristic
-                        # Scale the intervention based on how much the refusal direction is represented in the expert's weight matrix.
-                        w_norm = torch.norm(W)
-                        lora_A_norm = torch.norm(lora_A)
-                        if w_norm > 0:
-                            alignment = (lora_A_norm / w_norm).item()
-                            # Scale the weight up to 1x based on alignment (amplified by a constant factor)
-                            # to selectively target aligned experts while preserving others.
-                            ega_scale = min(1.0, alignment * 20.0)
-                            current_weight = current_weight * ega_scale
+                        # MoE Expert-Granular Abliteration: modify experts that carry
+                        # the refusal direction, leave benign knowledge experts alone.
+                        current_weight = current_weight * _ega_scale(lora_A, W)
 
                     # Calculate lora_B = -current_weight * v
                     # v is (d_out,)

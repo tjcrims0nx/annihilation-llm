@@ -658,10 +658,16 @@ impl App {
                                     extra_args.push("bnb_4bit".to_string());
                                 }
 
+                                // Pass every OBLITERATUS flag explicitly in both
+                                // branches. Relying on the config.py defaults for the
+                                // enabled case meant a change to those defaults would
+                                // silently downgrade this to gaussian-kernel-only while
+                                // the TUI still reported the mode as on.
                                 if self.use_obliteratus {
                                     extra_args.push("--kernel-type".to_string());
                                     extra_args.push("gaussian".to_string());
-                                    // By default use_cosmic_layer_selection and use_ega are true in config.py
+                                    extra_args.push("--use-cosmic-layer-selection".to_string());
+                                    extra_args.push("--use-ega".to_string());
                                 } else {
                                     extra_args.push("--kernel-type".to_string());
                                     extra_args.push("linear".to_string());
