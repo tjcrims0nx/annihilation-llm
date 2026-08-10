@@ -175,7 +175,7 @@ def main():
 
                 def generate():
                     try:
-                        model.model.generate(**generation_kwargs)
+                        model.model.generate(**generation_kwargs)  # ty:ignore[call-non-callable]
                     except BaseException as error:  # noqa: BLE001
                         generation_error.append(error)
                         streamer.end()
