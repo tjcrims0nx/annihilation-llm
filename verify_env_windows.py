@@ -4,6 +4,42 @@ import shutil
 import subprocess
 import sys
 
+# Settings the TUI passes on the command line every run now that OBLITERATUS is
+# integrated: `--kernel-type`, `--use-cosmic-layer-selection`, `--use-ega`.
+OBLITERATUS_SETTINGS = ("kernel_type", "use_cosmic_layer_selection", "use_ega")
+
+
+def missing_obliteratus_settings() -> list[str]:
+    """Names of the OBLITERATUS settings the installed `annihilate` does not have.
+
+    An `annihilate` predating the OBLITERATUS integration imports fine, so the
+    `find_spec` check below passes and this script reports the environment as
+    good, and then the run dies on "unrecognized arguments" once the TUI spawns
+    the engine, after a model has already been downloaded and loaded. Checking
+    the fields turns that into a reinstall here instead.
+
+    Probed out of process for the same reason as the CUDA check further down:
+    nothing this script verifies should be left imported in this interpreter.
+    """
+    probe = (
+        "from annihilate.config import Settings\n"
+        f"names = {OBLITERATUS_SETTINGS!r}\n"
+        "print(' '.join(n for n in names if n not in Settings.model_fields))\n"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        # Importable per `find_spec` but not actually usable. Reported as all
+        # settings missing: a broken engine and a stale one need the same remedy.
+        return list(OBLITERATUS_SETTINGS)
+
+    return result.stdout.split()
+
 
 def main():
     is_gpu = "--gpu" in sys.argv
@@ -20,6 +56,18 @@ def main():
     except ImportError as e:
         print(f"Missing dependency detected ({e}). Installing...", flush=True)
         needs_install = True
+
+    # Only worth probing when the package is there to probe; otherwise the
+    # install below is already going to happen.
+    if not needs_install:
+        missing = missing_obliteratus_settings()
+        if missing:
+            print(
+                f"Installed annihilate predates OBLITERATUS (missing {', '.join(missing)}). "
+                "Reinstalling...",
+                flush=True,
+            )
+            needs_install = True
 
     if needs_install:
         has_uv = shutil.which("uv") is not None
@@ -45,6 +93,21 @@ def main():
             subprocess.run(cmd, check=True)
 
         print("Dependencies installation complete.", flush=True)
+
+        # A reinstall that still does not provide the settings means something is
+        # shadowing this checkout: an older wheel carrying the same version
+        # number, or a stray `annihilate/` earlier on sys.path. Stop here, since
+        # the whole point of the check is to not discover it mid-run.
+        still_missing = missing_obliteratus_settings()
+        if still_missing:
+            print(
+                "ERROR: annihilate still does not provide "
+                f"{', '.join(still_missing)} after reinstalling. Another "
+                "annihilate is shadowing this checkout. Uninstall it with "
+                "`pip uninstall annihilate-llm` and try again.",
+                flush=True,
+            )
+            sys.exit(1)
 
     if is_gpu:
         # Use a subprocess to check CUDA availability without loading the DLL into this process
