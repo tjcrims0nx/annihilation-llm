@@ -21,7 +21,7 @@
 - 🖥️ **Terminal UI**: A beautiful, real-time dashboard built in Rust.
 - ⚡ **Zero-Shot Decensoring**: Removes refusals while preserving the model's core capabilities.
 - 🌌 **OBLITERATUS Integration**: Advanced experimental algorithms (COSMIC Layer Selection, Gaussian-shaped ablation kernels, and Expert-Granular Abliteration) integrated directly from OBLITERATUS.
-- 🎯 **Broad Transformer Compatibility**: Supports transformer-based dense, MoE, hybrid, and multimodal architectures. Less-tested model families may require architecture-specific tensor targeting and output-quality validation.
+- 🎯 **Broad Transformer Compatibility**: Supports transformer-based dense, MoE, hybrid, and multimodal architectures, including pre-quantized `compressed-tensors`/FP8 checkpoints. Less-tested model families may require architecture-specific tensor targeting and output-quality validation.
 - 🔍 **Automatic Format Detection**: Reads a model's config before downloading any weights, so an unsupported architecture, a missing quantization backend, or a repository that executes its own code is reported by name up front rather than failing minutes into a load.
 - 📦 **Pre-Quantized Models**: Loads models that already ship quantized — including `compressed-tensors`/FP8, GPTQ, AWQ, and bitsandbytes — provided the corresponding backend package is installed. Abliteration itself is format-agnostic.
 
