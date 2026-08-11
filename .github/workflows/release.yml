@@ -1,0 +1,158 @@
+name: Release
+
+# Publishes the annihilate-llm engine to PyPI and pushes the matching artifact
+# bundle to GHCR. Neither step needs a hand-carried credential: PyPI uses
+# trusted publishing (OIDC) and GHCR uses the built-in GITHUB_TOKEN.
+#
+# One-time setup on PyPI, required before the pypi job can succeed:
+#   https://pypi.org/manage/project/annihilate-llm/settings/publishing/
+#   Owner: tjcrims0nx | Repository: annihilation-llm
+#   Workflow: release.yml | Environment: pypi
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+
+      - name: Resolve and verify version
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          echo "annihilate-llm $version"
+
+          # tui/build.rs panics if the crate disagrees with pyproject.toml, but
+          # that only fires when the TUI is compiled. A release names one
+          # version, so check it here too rather than shipping a split release.
+          crate="$(sed -n '/^\[package\]/,/^\[/p' tui/Cargo.toml | sed -n 's/^version = "\(.*\)"$/\1/p' | head -n1)"
+          if [ "$crate" != "$version" ]; then
+            echo "::error::tui/Cargo.toml is $crate but pyproject.toml is $version"
+            exit 1
+          fi
+
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match pyproject.toml version $version (expected v$version)"
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build wheel and sdist
+        run: uv build
+
+      # A version can never be re-uploaded to PyPI, so catch a broken README or
+      # malformed metadata here rather than burning the version number on it.
+      - name: Check metadata
+        run: uvx twine check --strict dist/*
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/annihilate-llm/${{ needs.build.outputs.version }}
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@v1.14.2
+        with:
+          # Lets a re-run finish the GHCR half without failing on a version
+          # that is already live.
+          skip-existing: true
+
+  ghcr:
+    name: Push artifact bundle to GHCR
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: bundle/dist
+
+      - name: Write bundle Dockerfile
+        id: meta
+        run: |
+          set -euo pipefail
+          # Generated here rather than committed: packaging stays out of the
+          # source tree. `FROM scratch` plus a single COPY reproduces the
+          # one-layer shape of the existing package — this is an artifact
+          # bundle to download from, not a runnable image, so it has no
+          # entrypoint on purpose.
+          cat > bundle/Dockerfile <<'EOF'
+          FROM scratch
+          COPY dist/ /packages/
+          EOF
+          echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7.3.0
+        with:
+          context: bundle
+          platforms: linux/amd64
+          push: true
+          # Attestations would turn this into a multi-manifest index and add an
+          # unknown/unknown entry to the package page. Keep the single manifest
+          # the published package already has.
+          provenance: false
+          sbom: false
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/annihilate-llm:${{ needs.build.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/annihilate-llm:latest
+          labels: |
+            org.opencontainers.image.created=${{ steps.meta.outputs.created }}
+            org.opencontainers.image.description=Python wheel and source distribution bundle
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.title=annihilate-llm
+            org.opencontainers.image.version=${{ needs.build.outputs.version }}
