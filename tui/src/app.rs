@@ -279,6 +279,86 @@ fn wrapped_line_count(text: &str, width: usize) -> usize {
     lines.max(1)
 }
 
+/// Split `text` into the rows it occupies in a pane `width` columns wide.
+///
+/// The log panes drew one unwrapped row per entry, so anything wider than the
+/// pane — repository ids, file paths, tracebacks — was clipped at the border
+/// with no way to read the rest. Wrapping here rather than through
+/// `Paragraph`'s `Wrap` keeps the row count exact, so scroll positions are
+/// expressed in the same units that end up on screen.
+///
+/// Row counts agree with [`wrapped_line_count`]; a test pins that.
+fn wrap_line(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        // Degenerate pane. Mirror `wrapped_line_count`'s fallback: one row per
+        // explicit line, never zero.
+        let rows: Vec<String> = text.lines().map(str::to_string).collect();
+        return if rows.is_empty() {
+            vec![String::new()]
+        } else {
+            rows
+        };
+    }
+
+    let mut rows = Vec::new();
+
+    for segment in text.split('\n') {
+        let mut current = String::new();
+        let mut column = 0;
+
+        for word in segment.split_whitespace() {
+            let word_width = char_len(word);
+
+            if column > 0 && column + 1 + word_width <= width {
+                current.push(' ');
+                current.push_str(word);
+                column += 1 + word_width;
+                continue;
+            }
+
+            if column > 0 {
+                rows.push(std::mem::take(&mut current));
+            }
+
+            // A word wider than the pane is broken across rows rather than
+            // clipped; long model ids and paths hit this routinely.
+            let mut chars = word.chars().peekable();
+            loop {
+                current = chars.by_ref().take(width).collect();
+                column = char_len(&current);
+                if chars.peek().is_none() {
+                    break;
+                }
+                rows.push(std::mem::take(&mut current));
+            }
+        }
+
+        rows.push(current);
+    }
+
+    rows
+}
+
+/// Index of the first log entry to draw so the newest one lands on the last row
+/// of a pane `rows` tall and `width` columns wide.
+///
+/// A wrapped entry can occupy several rows, so the old `len - rows` arithmetic
+/// overshot and scrolled the newest output off the bottom. Walking back from the
+/// end touches only as many entries as actually fit on screen, which keeps this
+/// cheap on a log that grows for the length of a run.
+fn log_window_start(entries: &[(String, LogLevel)], width: usize, rows: usize) -> usize {
+    let mut used = 0;
+
+    for (index, (text, _)) in entries.iter().enumerate().rev() {
+        used += wrapped_line_count(text, width);
+        if used >= rows {
+            return index;
+        }
+    }
+
+    0
+}
+
 /// Completion line for a child process exit, plus the level to style it at.
 ///
 /// A clean exit is a success, not a warning: a finished GGUF conversion used to
@@ -3074,38 +3154,57 @@ impl App {
         let log_inner = log_block.inner(left_chunks[2]);
         frame.render_widget(log_block, left_chunks[2]);
 
-        let visible_lines = log_inner.height as usize;
+        let visible_rows = log_inner.height as usize;
+        // One column narrower than the pane: entries are drawn with a leading
+        // space, and wrapping has to account for that gutter or the last
+        // character of every full row falls off the edge.
+        let content_width = log_inner.width.saturating_sub(1) as usize;
 
-        if self.log_auto_scroll {
-            self.log_scroll = self.log_lines.len().saturating_sub(visible_lines);
-        } else {
-            // Clamp scroll to valid bounds just in case, and re-enable auto-scroll if at bottom
-            let max_scroll = self.log_lines.len().saturating_sub(visible_lines);
-            if self.log_scroll >= max_scroll {
-                self.log_scroll = max_scroll;
-                self.log_auto_scroll = true;
+        // Bottom of the log, in entries. Wrapped entries span several rows, so
+        // this cannot be derived from the entry count alone.
+        let max_scroll = log_window_start(&self.log_lines, content_width, visible_rows);
+
+        if self.log_auto_scroll || self.log_scroll >= max_scroll {
+            self.log_scroll = max_scroll;
+            self.log_auto_scroll = true;
+        }
+
+        let mut log_items: Vec<ListItem> = Vec::new();
+        for (text, level) in &self.log_lines[self.log_scroll..] {
+            let style = match level {
+                LogLevel::Info => Style::default().fg(theme::TEXT_PRIMARY),
+                LogLevel::Success => theme::success_style(),
+                LogLevel::Warning => theme::warning_style(),
+                LogLevel::Error => theme::error_style(),
+                LogLevel::Dim => theme::dim_style(),
+            };
+
+            for row in wrap_line(text, content_width) {
+                log_items.push(ListItem::new(Line::from(Span::styled(
+                    format!(" {row}"),
+                    style,
+                ))));
+            }
+
+            // Pinned to the bottom, every remaining entry has to be laid out so
+            // the newest row can be the last one. Scrolled up, one pane's worth
+            // is all that gets drawn.
+            if !self.log_auto_scroll && log_items.len() >= visible_rows {
+                break;
             }
         }
 
-        let start = self.log_scroll;
-        let end = (start + visible_lines).min(self.log_lines.len());
+        // The oldest visible entry may be only partly on screen, so trim from
+        // the top rather than dropping the newest rows.
+        let skip = if self.log_auto_scroll {
+            log_items.len().saturating_sub(visible_rows)
+        } else {
+            0
+        };
+        log_items.drain(..skip);
+        log_items.truncate(visible_rows);
 
-        let log_items: Vec<ListItem> = self.log_lines[start..end]
-            .iter()
-            .map(|(text, level)| {
-                let style = match level {
-                    LogLevel::Info => Style::default().fg(theme::TEXT_PRIMARY),
-                    LogLevel::Success => theme::success_style(),
-                    LogLevel::Warning => theme::warning_style(),
-                    LogLevel::Error => theme::error_style(),
-                    LogLevel::Dim => theme::dim_style(),
-                };
-                ListItem::new(Line::from(Span::styled(format!(" {}", text), style)))
-            })
-            .collect();
-
-        let log_list = List::new(log_items);
-        frame.render_widget(log_list, log_inner);
+        frame.render_widget(List::new(log_items), log_inner);
 
         // ── System Info ──
         let sys_block = Block::default()
@@ -3422,49 +3521,51 @@ impl App {
         frame.render_widget(results_table, chunks[1]);
 
         // Logs
-        let log_lines_ui: Vec<Line> = self
-            .log_lines
-            .iter()
-            .map(|(msg, level)| {
-                let style = match level {
-                    LogLevel::Info => Style::default().fg(theme::TEXT_PRIMARY),
-                    LogLevel::Success => Style::default().fg(theme::NEON_GREEN),
-                    LogLevel::Warning => Style::default().fg(theme::NEON_AMBER),
-                    LogLevel::Error => Style::default().fg(theme::NEON_RED),
-                    LogLevel::Dim => theme::dim_style(),
-                };
-                Line::from(Span::styled(msg, style))
-            })
-            .collect();
+        let log_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+            .title("Process Log");
+        let log_inner = log_block.inner(chunks[2]);
 
-        let log_len = log_lines_ui.len();
-        let log_height = chunks[2].height.saturating_sub(2) as usize; // account for borders
+        let visible_rows = log_inner.height as usize;
+        let content_width = log_inner.width as usize;
+        let max_scroll = log_window_start(&self.log_lines, content_width, visible_rows);
 
-        // Handle auto-scrolling
-        if self.log_auto_scroll {
-            if log_len > log_height {
-                self.log_scroll = log_len - log_height;
-            } else {
-                self.log_scroll = 0;
+        if self.log_auto_scroll || self.log_scroll >= max_scroll {
+            self.log_scroll = max_scroll;
+            self.log_auto_scroll = true;
+        }
+
+        let mut log_lines_ui: Vec<Line> = Vec::new();
+        for (msg, level) in &self.log_lines[self.log_scroll..] {
+            let style = match level {
+                LogLevel::Info => Style::default().fg(theme::TEXT_PRIMARY),
+                LogLevel::Success => Style::default().fg(theme::NEON_GREEN),
+                LogLevel::Warning => Style::default().fg(theme::NEON_AMBER),
+                LogLevel::Error => Style::default().fg(theme::NEON_RED),
+                LogLevel::Dim => theme::dim_style(),
+            };
+
+            for row in wrap_line(msg, content_width) {
+                log_lines_ui.push(Line::from(Span::styled(row, style)));
+            }
+
+            if !self.log_auto_scroll && log_lines_ui.len() >= visible_rows {
+                break;
             }
         }
 
-        let max_scroll = log_len.saturating_sub(log_height);
-        if self.log_scroll > max_scroll {
-            self.log_scroll = max_scroll;
-        }
+        let skip = if self.log_auto_scroll {
+            log_lines_ui.len().saturating_sub(visible_rows)
+        } else {
+            0
+        };
+        log_lines_ui.drain(..skip);
+        log_lines_ui.truncate(visible_rows);
 
-        let logs = Paragraph::new(log_lines_ui)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(theme::BORDER_INACTIVE))
-                    .title("Process Log"),
-            )
-            .scroll((self.log_scroll as u16, 0));
-
-        frame.render_widget(logs, chunks[2]);
+        frame.render_widget(log_block, chunks[2]);
+        frame.render_widget(Paragraph::new(log_lines_ui), log_inner);
     }
 
     // ─── Chat Screen ───────────────────────────────────────────
@@ -3927,5 +4028,202 @@ mod tests {
         assert_eq!(mask_secret(""), "");
         // Multi-byte input would panic under byte slicing.
         assert_eq!(mask_secret("éàüxy"), "éàü**");
+    }
+
+    /// Log entries of the shapes that actually reach the panes.
+    const WRAP_SAMPLES: &[&str] = &[
+        "",
+        "short",
+        "Loading model weights from disk",
+        "* Detected LlamaForCausalLM, multimodal, custom code",
+        "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
+        "https://huggingface.co/some-org/a-really-long-repository-name-goes-here",
+        "C:\\Users\\someone\\.cache\\huggingface\\hub\\models--org--name\\snapshots\\abc123",
+        "Trial 47 of 200 | refusals 3/100 | KL divergence 0.0312 | elapsed 01:12:44",
+        "multi\nline\nentry",
+        "trailing spaces   ",
+        "éàü 😀 wide characters mixed with ascii text that keeps going and going",
+    ];
+
+    #[test]
+    fn wrap_line_never_exceeds_the_pane() {
+        for text in WRAP_SAMPLES {
+            for width in 1..=40 {
+                for row in wrap_line(text, width) {
+                    assert!(
+                        char_len(&row) <= width,
+                        "row {row:?} exceeds width {width} for input {text:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wrap_line_agrees_with_wrapped_line_count() {
+        // Scroll bounds come from `wrapped_line_count` while the rows on screen
+        // come from `wrap_line`. If the two ever disagree the log scrolls past
+        // its own contents, so the equality is the contract.
+        for text in WRAP_SAMPLES {
+            for width in 0..=40 {
+                assert_eq!(
+                    wrap_line(text, width).len(),
+                    wrapped_line_count(text, width),
+                    "row count disagrees at width {width} for input {text:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wrap_line_keeps_every_word() {
+        // Wrapping must not be truncation by another name: the point of the
+        // change is that nothing gets dropped at the pane edge.
+        for text in WRAP_SAMPLES {
+            let expected: Vec<&str> = text.split_whitespace().collect();
+            for width in 1..=40 {
+                let joined = wrap_line(text, width).join("");
+                let mut rebuilt = String::new();
+                for word in &expected {
+                    rebuilt.push_str(word);
+                }
+                assert_eq!(
+                    joined.replace(' ', ""),
+                    rebuilt,
+                    "content lost at width {width} for input {text:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn log_window_start_accounts_for_wrapping() {
+        let width = 10;
+        let entries = vec![
+            ("first".to_string(), LogLevel::Info),
+            // Three rows at width 10.
+            ("aaaaaaaaaabbbbbbbbbbcccccccccc".to_string(), LogLevel::Info),
+            ("last".to_string(), LogLevel::Info),
+        ];
+
+        // Four rows fit the wrapped entry plus "last"; entry-count arithmetic
+        // would have started at index 1 for a 4-row pane too, but would have
+        // been wrong for 5.
+        assert_eq!(log_window_start(&entries, width, 4), 1);
+        assert_eq!(log_window_start(&entries, width, 5), 0);
+        // A pane taller than the whole log starts at the top.
+        assert_eq!(log_window_start(&entries, width, 99), 0);
+        // Newest entry alone fills a one-row pane.
+        assert_eq!(log_window_start(&entries, width, 1), 2);
+        assert_eq!(log_window_start(&[], width, 10), 0);
+    }
+
+    /// Render `app` into an off-screen terminal and return the painted rows.
+    fn painted_rows(app: &mut App, width: u16, height: u16) -> Vec<String> {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| app.render(frame)).unwrap();
+
+        let buffer = terminal.backend().buffer().clone();
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer.cell((x, y)).unwrap().symbol().to_string())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn dashboard_log_shows_long_entries_in_full() {
+        // The pane used to draw one unwrapped row per entry, so a long line was
+        // clipped at the border and the rest was unreachable. Render the real
+        // widget and read the cells back: every word has to be on screen.
+        let long = "Loading unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF from the local \
+                    HuggingFace cache before starting the optimization run";
+
+        let mut app = App::new();
+        app.screen = Screen::Processing;
+        app.log_lines.push((long.to_string(), LogLevel::Info));
+
+        let rows = painted_rows(&mut app, 120, 40);
+        let painted = rows.join(" ");
+
+        for word in long.split_whitespace() {
+            assert!(
+                painted.contains(word),
+                "{word:?} was clipped out of the log pane\n{}",
+                rows.join("\n")
+            );
+        }
+    }
+
+    #[test]
+    fn dashboard_log_keeps_the_newest_line_visible() {
+        // Auto-scroll pins the bottom of the log. With wrapped entries the old
+        // `len - height` arithmetic overshot, pushing the newest output off the
+        // pane exactly when a run started producing long lines.
+        let mut app = App::new();
+        app.screen = Screen::Processing;
+        for index in 0..60 {
+            app.log_lines.push((
+                format!("entry {index} padded out until it has to wrap across the pane width"),
+                LogLevel::Info,
+            ));
+        }
+
+        let rows = painted_rows(&mut app, 120, 40);
+        assert!(
+            rows.iter().any(|row| row.contains("entry 59")),
+            "newest entry is not on screen\n{}",
+            rows.join("\n")
+        );
+    }
+
+    #[test]
+    fn dashboard_log_stays_inside_its_borders() {
+        // Wrapping is only a fix if it respects the pane: a run of log text must
+        // stop at the pane's own border rather than painting over the border or
+        // the panel beside it.
+        let mut app = App::new();
+        app.screen = Screen::Processing;
+        for index in 0..40 {
+            app.log_lines.push((
+                format!(
+                    "{index} ==================================================================\
+                     ================================================================== end"
+                ),
+                LogLevel::Info,
+            ));
+        }
+
+        let rows = painted_rows(&mut app, 120, 40);
+        let mut checked = 0;
+
+        for row in &rows {
+            let cells: Vec<char> = row.chars().collect();
+            if !cells.contains(&'=') {
+                continue;
+            }
+
+            // The pane's right border is the first `│` after the left one.
+            let right_border = cells
+                .iter()
+                .skip(1)
+                .position(|&c| c == '│')
+                .map(|index| index + 1)
+                .expect("log pane right border not found");
+
+            checked += 1;
+            let overflow: String = cells[right_border + 1..].iter().collect();
+            assert!(
+                overflow.trim().is_empty() || !overflow.contains('='),
+                "log text ran past the pane border at column {right_border}: {row:?}"
+            );
+        }
+
+        assert!(checked > 0, "no log rows rendered\n{}", rows.join("\n"));
     }
 }
