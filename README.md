@@ -22,6 +22,29 @@
 - ⚡ **Zero-Shot Decensoring**: Removes refusals while preserving the model's core capabilities.
 - 🌌 **OBLITERATUS Integration**: Advanced experimental algorithms (COSMIC Layer Selection, Gaussian-shaped ablation kernels, and Expert-Granular Abliteration) integrated directly from OBLITERATUS.
 - 🎯 **Broad Transformer Compatibility**: Supports transformer-based dense, MoE, hybrid, and multimodal architectures. Less-tested model families may require architecture-specific tensor targeting and output-quality validation.
+- 🔍 **Automatic Format Detection**: Reads a model's config before downloading any weights, so an unsupported architecture, a missing quantization backend, or a repository that executes its own code is reported by name up front rather than failing minutes into a load.
+- 📦 **Pre-Quantized Models**: Loads models that already ship quantized — including `compressed-tensors`/FP8, GPTQ, AWQ, and bitsandbytes — provided the corresponding backend package is installed. Abliteration itself is format-agnostic.
+
+---
+
+## 🔍 Model Format Detection
+
+Before any weights are fetched, Annihilation inspects the model's `config.json` and reports what it found:
+
+```
+* Detected LlamaForCausalLM
+* Pre-quantized model: compressed-tensors
+```
+
+Both lines appear in the TUI log, and the architecture and quantization method are shown in the dashboard's **SYSTEM** panel, so you can confirm the right model loaded before committing to a long run.
+
+This step exists to fail early and legibly:
+
+- **Missing quantization backend** → an error naming the exact package to `pip install`, instead of a stack trace from deep inside the loading code.
+- **Custom architecture code** → a warning that loading the model executes code from its repository. Pass `--trust-remote-code` once you have reviewed it.
+- **Already-quantized model** → `--quantization bnb_4bit` is ignored rather than stacked on top of the model's own quantization.
+
+> 💡 **Note on exporting:** merging LoRA adapters into a pre-quantized model dequantizes the targeted layers, so the exported weights are full precision and larger than the original repository. Export as an adapter instead to keep the quantized base.
 
 ---
 
@@ -58,9 +81,11 @@ You can now toggle experimental algorithms directly from the TUI configuration m
 If you want to bypass the TUI entirely and use the core Python CLI, you can run it directly from the virtual environment:
 
 ```powershell
-.\.venv\Scripts\python.exe -m annihilate --help
+.\annihilation-env\Scripts\python.exe -m annihilate --help
 # Example:
-.\.venv\Scripts\python.exe -m annihilate --model openbmb/MiniCPM5-1B --n-trials 200
+.\annihilation-env\Scripts\python.exe -m annihilate --model openbmb/MiniCPM5-1B --n-trials 200
+# Check the installed engine version:
+.\annihilation-env\Scripts\python.exe -m annihilate --version
 ```
 
 ---
@@ -71,13 +96,22 @@ Ensure you have **Python 3.10+** and **Rust** installed, and that your PyTorch i
 
 ### Setup & Launch
 
+The TUI is the Rust front-end; the abliteration engine ships as the [`annihilate-llm`](https://pypi.org/project/annihilate-llm/) package on PyPI. Install the engine into a virtual environment at the repository root, then launch the TUI:
+
 ```powershell
 git clone https://github.com/tjcrims0nx/annihilation-llm.git
 cd annihilation-llm
+
+# Create the environment the TUI looks for and install the engine into it
+uv venv annihilation-env
+uv pip install --python annihilation-env annihilate-llm
+
 .\start.bat
 ```
 
-> 💡 **Note:** The very first time you run this, it will take a minute to compile the Rust TUI and set up the Python virtual environment. Subsequent launches will be near-instant! You do **not** need to manually build the project; the `start.bat` script handles all compilation and environment setup on the fly.
+The TUI locates the interpreter by checking `.venv`, `annihilation-env`, `venv`, and `env` at the repository root, in that order — any of those names works.
+
+> 💡 **Note:** `start.bat` compiles the Rust TUI, so the very first launch takes a minute. Subsequent launches are near-instant. It does **not** create the Python environment — do that once, as above.
 
 ---
 
