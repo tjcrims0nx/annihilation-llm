@@ -24,6 +24,8 @@
 - 🎯 **Broad Transformer Compatibility**: Supports transformer-based dense, MoE, hybrid, and multimodal architectures, including pre-quantized `compressed-tensors`/FP8 checkpoints. Less-tested model families may require architecture-specific tensor targeting and output-quality validation.
 - 🔍 **Automatic Format Detection**: Reads a model's config before downloading any weights, so an unsupported architecture, a missing quantization backend, or a repository that executes its own code is reported by name up front rather than failing minutes into a load.
 - 📦 **Pre-Quantized Models**: Loads models that already ship quantized — including `compressed-tensors`/FP8, GPTQ, AWQ, and bitsandbytes — provided the corresponding backend package is installed. Abliteration itself is format-agnostic.
+- 📊 **Benchmark the Annihilated Model**: Rebuilds the best trial straight from the checkpoint and scores it with the `lm-eval` harness, so you can measure what the abliteration cost in raw capability without re-running the study.
+- 💾 **GGUF Export**: Converts the annihilated model to GGUF (`Q4_K_M`, `Q8_0`, or unquantized F16) for llama.cpp, Ollama, and LM Studio. The llama.cpp toolchain is fetched and checksum-verified on demand — no manual export step in between.
 
 ---
 
@@ -73,6 +75,58 @@ You can now toggle experimental algorithms directly from the TUI configuration m
 - **COSMIC Layer Selection**: Instead of blindly searching across the entire network, the system analyzes cosine similarities between harmless and harmful residual streams. It automatically anchors the optimization process around the mathematically proven optimal layer, massively reducing the search space.
 - **Expert-Granular Abliteration (EGA)**: For Mixture-of-Experts (MoE) models, EGA scores each expert's weight matrix against the target refusal direction. Instead of applying a flat penalty, experts holding high concentrations of refusal vectors take the full intervention, while experts no better aligned than chance are scaled down to roughly a third of it. The score is measured relative to chance alignment, so it means the same thing at any hidden size.
 - **Gaussian-shaped Ablation Kernels**: Replaces traditional rigid interpolation bounds with a smooth, bell-shaped Gaussian curve to distribute weight changes across adjacent layers. This results in smoother vector blending and better text coherence post-ablation.
+
+---
+
+## 📊 Benchmarking the Annihilated Model
+
+Abliteration is a trade: refusals go down, and capability may go with them. Annihilation can score the finished model so that trade is measured rather than assumed.
+
+Reach it from the TUI via **Completed Models** (`M`) → pick a model → **Run Benchmarks** (`B`), or from the same actions menu right after a run finishes.
+
+What happens on that keypress:
+
+1. The best trial is read out of `checkpoints/<model>.jsonl` — fewest refusals, ties broken by lowest KL divergence.
+2. It is rebuilt under the settings the study actually ran with, including the pinned `model_commit` revision. Reconstructing a trial under different settings silently produces a *different* model, so the original settings are reused rather than re-derived.
+3. Refusal directions are recomputed, the trial's abliteration parameters are applied, and the result is handed to `lm-eval`'s `HFLM` wrapper with automatic batch sizing.
+4. Every metric streams into the **Benchmark Dashboard** as it lands, alongside the live process log.
+
+The default tasks are `hellaswag` and `arc_easy`. Any `lm-eval` task works when driving the script directly:
+
+```powershell
+.\annihilation-env\Scripts\python.exe -u scripts/run_benchmarks.py openbmb/MiniCPM5-1B mmlu,gsm8k
+```
+
+The harness ships with the engine, so there is nothing extra to install. Nothing is written to disk either — the model is reconstructed in memory, so benchmarking never leaves an export behind. A completed run is required: with no checkpoint for that model, it stops with `No checkpoint found ... Run annihilation first.`
+
+---
+
+## 💾 GGUF Export
+
+From the TUI: **Convert to GGUF** (`G`), then choose how hard to quantize.
+
+| Option | Trade-off |
+| --- | --- |
+| `Q4_K_M` | Good balance of quality and size (recommended) |
+| `Q8_0` | Near-perfect quality, larger file |
+| `F16` | Unquantized, maximum quality |
+
+The result lands in `exports/<model>-<quant>.gguf`. The TUI confirms the file actually exists once the converter exits — a zero exit code on its own is not proof of an artifact.
+
+Conversion runs in two stages, matching llama.cpp's own pipeline:
+
+1. `convert_hf_to_gguf.py` writes an F16 GGUF intermediate next to the target.
+2. `llama-quantize` compresses that to the requested type, then the intermediate is deleted. Choosing F16 skips this stage and just keeps the intermediate.
+
+**Straight off a finished study.** Point it at a model *name* rather than a directory and the annihilated model is reconstructed from the checkpoint exactly as the benchmark path does — best trial, original settings — merged, written to a scratch folder, converted, and the scratch folder is removed. No separate "export merged model" step is needed first:
+
+```powershell
+.\annihilation-env\Scripts\python.exe scripts/gguf_converter.py --model-path openbmb/MiniCPM5-1B --quant-type Q4_K_M --output exports/minicpm5-Q4_K_M.gguf
+```
+
+**On the llama.cpp toolchain.** It is downloaded on first use, not vendored. Prebuilt Windows binaries come from the latest [`ggml-org/llama.cpp`](https://github.com/ggml-org/llama.cpp) release, and the matching source archive is pinned to that same release tag instead of tracking `master`. Because both are *executed*, they are treated as code: downloads are restricted to HTTPS, the SHA-256 is verified against GitHub's published asset digest, and archive members that would escape the extraction directory are rejected outright. Pin your own digests with `LLAMA_CPP_BIN_SHA256` and `LLAMA_CPP_SRC_SHA256`.
+
+> 💡 **Note:** automatic binary download is currently Windows-only. On Linux and macOS, place a `llama-quantize` binary under `scripts/llama_cpp_bin/` yourself; the conversion script is still fetched automatically.
 
 ---
 
