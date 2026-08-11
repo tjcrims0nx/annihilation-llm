@@ -1272,7 +1272,7 @@ impl App {
                     self.screen = Screen::TrialActions;
                     self.current_menu = vec![
                         MenuItem::new("Chat with Model", "Test the decensored model").with_key("C"),
-                        MenuItem::new("Run Benchmarks", "Evaluate with MMLU, GSM8K, etc.")
+                        MenuItem::new("Run Benchmarks", "Evaluate with HellaSwag and ARC-Easy")
                             .with_key("B"),
                         MenuItem::new("Convert to GGUF", "Export as a quantized GGUF file")
                             .with_key("G"),
@@ -1734,7 +1734,7 @@ impl App {
                         MenuItem::new("Upload to Hugging Face", "Push model to HF Hub")
                             .with_key("U"),
                         MenuItem::new("Chat with Model", "Test the decensored model").with_key("C"),
-                        MenuItem::new("Run Benchmarks", "Evaluate with MMLU, GSM8K, etc.")
+                        MenuItem::new("Run Benchmarks", "Evaluate with HellaSwag and ARC-Easy")
                             .with_key("B"),
                         MenuItem::new("Run More Trials", "Continue optimization").with_key("R"),
                         MenuItem::new("Back to Results", "Return to trial selection")
@@ -2026,7 +2026,10 @@ impl App {
                 match self.menu_state.selected() {
                     Some(0) => self.gguf_size = "Q4_K_M".to_string(),
                     Some(1) => self.gguf_size = "Q8_0".to_string(),
-                    Some(2) => self.gguf_size = "f16".to_string(),
+                    // Upper case to match the other two: this string ends up in
+                    // the export's filename, and `-f16.gguf` next to
+                    // `-Q4_K_M.gguf` looked like two different tools wrote them.
+                    Some(2) => self.gguf_size = "F16".to_string(),
                     _ => {
                         self.go_back_to_splash();
                         return;
@@ -2975,6 +2978,84 @@ impl App {
 
     // ─── Processing Dashboard ──────────────────────────────────
 
+    /// Rows for the dashboard's SYSTEM panel, wrapped to fit `width` columns.
+    ///
+    /// The panel is a quarter of the terminal wide, so a real GPU name — "NVIDIA
+    /// GeForce RTX 2050" is 23 columns before the label is even counted — did not
+    /// fit on one row and was cut off at the border with no way to see the rest.
+    /// Continuation rows are indented so a wrapped value still reads as one
+    /// field.
+    ///
+    /// Returns owned lines so the caller can size the panel to the row count
+    /// before it starts borrowing `self` mutably to draw.
+    fn system_panel_lines(&self, width: usize) -> Vec<Line<'static>> {
+        let mut fields: Vec<(&'static str, String, Style)> = vec![
+            (
+                " GPU: ",
+                self.sys_info.gpu_name.clone(),
+                Style::default().fg(theme::NEON_PURPLE),
+            ),
+            (
+                " VRAM: ",
+                format!(
+                    "{:.1}/{:.0} GB",
+                    self.sys_info.vram_used_gb(),
+                    self.sys_info.vram_total_gb()
+                ),
+                theme::highlight_value(),
+            ),
+            (
+                " RAM: ",
+                format!(
+                    "{:.1}/{:.0} GB",
+                    self.sys_info.ram_used_gb(),
+                    self.sys_info.ram_total_gb()
+                ),
+                theme::highlight_value(),
+            ),
+            (
+                " Batch: ",
+                format!("{}", self.batch_size),
+                theme::highlight_value(),
+            ),
+            (
+                " Tok/s: ",
+                format!("{:.0}", self.tokens_per_sec),
+                Style::default().fg(theme::NEON_GREEN),
+            ),
+        ];
+
+        if let Some(architecture) = &self.model_architecture {
+            fields.push((" Arch: ", architecture.clone(), theme::highlight_value()));
+        }
+
+        if let Some(quantization) = &self.model_quantization {
+            fields.push((" Quant: ", quantization.clone(), theme::highlight_value()));
+        }
+
+        const INDENT: &str = "   ";
+        let mut lines = Vec::new();
+
+        for (label, value, style) in fields {
+            // Every row of a field is wrapped to the width left over after its
+            // label, not just the first. That leaves a continuation row a couple
+            // of columns short of what it could hold, which is a fair trade for
+            // one wrap width per field — and since the shortest label is wider
+            // than the indent, a continuation row can never overflow.
+            let value_width = width.saturating_sub(char_len(label));
+
+            for (index, row) in wrap_line(&value, value_width).into_iter().enumerate() {
+                let prefix = if index == 0 { label } else { INDENT };
+                lines.push(Line::from(vec![
+                    Span::styled(prefix, theme::dim_style()),
+                    Span::styled(row, style),
+                ]));
+            }
+        }
+
+        lines
+    }
+
     fn render_processing(&mut self, frame: &mut Frame, area: Rect) {
         let main_chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -2995,12 +3076,23 @@ impl App {
             ])
             .split(main_chunks[0]);
 
+        // Built before the split so the panel can be sized to what it holds. The
+        // height was fixed at ten rows, which fit seven single-row fields
+        // exactly — as soon as the GPU name wrapped, Arch and Quant fell off the
+        // bottom.
+        let sys_lines = self.system_panel_lines(main_chunks[1].width.saturating_sub(2) as usize);
+        // Controls is a fixed eight rows and the settings panel asks for ten, so
+        // growing past what is left over would only squeeze those instead. Ten
+        // stays the floor, which keeps the usual layout unchanged.
+        let sys_max = main_chunks[1].height.saturating_sub(18).max(10);
+        let sys_height = (sys_lines.len() as u16 + 2).clamp(10, sys_max);
+
         let right_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(10), // system info
-                Constraint::Length(8),  // controls
-                Constraint::Min(10),    // settings
+                Constraint::Length(sys_height), // system info
+                Constraint::Length(8),          // controls
+                Constraint::Min(10),            // settings
             ])
             .split(main_chunks[1]);
 
@@ -3219,66 +3311,7 @@ impl App {
 
         let sys_inner = sys_block.inner(right_chunks[0]);
         frame.render_widget(sys_block, right_chunks[0]);
-
-        let mut sys_lines: Vec<Line> = vec![
-            Line::from(vec![
-                Span::styled(" GPU: ", theme::dim_style()),
-                Span::styled(
-                    &self.sys_info.gpu_name,
-                    Style::default().fg(theme::NEON_PURPLE),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled(" VRAM: ", theme::dim_style()),
-                Span::styled(
-                    format!(
-                        "{:.1}/{:.0} GB",
-                        self.sys_info.vram_used_gb(),
-                        self.sys_info.vram_total_gb()
-                    ),
-                    theme::highlight_value(),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled(" RAM: ", theme::dim_style()),
-                Span::styled(
-                    format!(
-                        "{:.1}/{:.0} GB",
-                        self.sys_info.ram_used_gb(),
-                        self.sys_info.ram_total_gb()
-                    ),
-                    theme::highlight_value(),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled(" Batch: ", theme::dim_style()),
-                Span::styled(format!("{}", self.batch_size), theme::highlight_value()),
-            ]),
-            Line::from(vec![
-                Span::styled(" Tok/s: ", theme::dim_style()),
-                Span::styled(
-                    format!("{:.0}", self.tokens_per_sec),
-                    Style::default().fg(theme::NEON_GREEN),
-                ),
-            ]),
-        ];
-
-        if let Some(architecture) = &self.model_architecture {
-            sys_lines.push(Line::from(vec![
-                Span::styled(" Arch: ", theme::dim_style()),
-                Span::styled(architecture.clone(), theme::highlight_value()),
-            ]));
-        }
-
-        if let Some(quantization) = &self.model_quantization {
-            sys_lines.push(Line::from(vec![
-                Span::styled(" Quant: ", theme::dim_style()),
-                Span::styled(quantization.clone(), theme::highlight_value()),
-            ]));
-        }
-
-        let sys_text = Paragraph::new(sys_lines);
-        frame.render_widget(sys_text, sys_inner);
+        frame.render_widget(Paragraph::new(sys_lines), sys_inner);
 
         // ── Controls ──
         let ctrl_block = Block::default()
@@ -4225,5 +4258,87 @@ mod tests {
         }
 
         assert!(checked > 0, "no log rows rendered\n{}", rows.join("\n"));
+    }
+
+    #[test]
+    fn system_panel_shows_the_full_gpu_name() {
+        // The panel drew one unwrapped row per field, so the GPU name was cut off
+        // at the border — an RTX 2050 showed up as "NVIDIA GeForce RTX 205".
+        let gpu = "NVIDIA GeForce RTX 4090 Laptop GPU";
+
+        let mut app = App::new();
+        app.screen = Screen::Processing;
+        app.sys_info.gpu_name = gpu.to_string();
+
+        let rows = painted_rows(&mut app, 120, 40);
+        let painted = rows.join(" ");
+
+        for word in gpu.split_whitespace() {
+            assert!(
+                painted.contains(word),
+                "{word:?} was clipped out of the SYSTEM panel\n{}",
+                rows.join("\n")
+            );
+        }
+    }
+
+    #[test]
+    fn system_panel_keeps_every_field_on_screen() {
+        // Ten rows fit exactly seven single-row fields. Once the GPU name and the
+        // architecture each need two rows the content no longer fits, and the
+        // last field used to fall off the bottom. The panel now grows instead.
+        let mut app = App::new();
+        app.screen = Screen::Processing;
+        app.sys_info.gpu_name = "NVIDIA GeForce RTX 4090 Laptop GPU".to_string();
+        app.model_architecture = Some("LlavaNextVideoForConditionalGeneration".to_string());
+        app.model_quantization = Some("compressed-tensors".to_string());
+
+        let rows = painted_rows(&mut app, 120, 40);
+        let painted = rows.join(" ");
+
+        for field in [
+            "GPU:", "VRAM:", "RAM:", "Batch:", "Tok/s:", "Arch:", "Quant:",
+        ] {
+            assert!(
+                painted.contains(field),
+                "{field:?} is not on screen\n{}",
+                rows.join("\n")
+            );
+        }
+
+        // The value, not just the label — a visible label whose value wrapped off
+        // the bottom would be no better than the truncation.
+        assert!(
+            painted.contains("compressed-tensors"),
+            "the last field's value is not on screen\n{}",
+            rows.join("\n")
+        );
+    }
+
+    #[test]
+    fn system_panel_lines_fit_the_pane() {
+        // Wrapping is only a fix if it respects the pane width, including on the
+        // continuation rows, which carry an indent instead of a label. Checked on
+        // the lines themselves: `Paragraph` clips silently, so a too-wide row
+        // would not show up in a render.
+        let mut app = App::new();
+        app.sys_info.gpu_name = "NVIDIA GeForce RTX 4090 Laptop GPU".to_string();
+        app.model_architecture = Some("LlavaNextVideoForConditionalGeneration".to_string());
+        app.model_quantization = Some("supercalifragilisticexpialidocious-tensors".to_string());
+
+        for width in [10, 14, 20, 28, 40, 80] {
+            for line in app.system_panel_lines(width) {
+                let painted: String = line
+                    .spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect();
+                assert!(
+                    char_len(&painted) <= width,
+                    "row is {} columns wide in a {width}-column pane: {painted:?}",
+                    char_len(&painted)
+                );
+            }
+        }
     }
 }
