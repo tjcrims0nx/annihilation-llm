@@ -378,6 +378,11 @@ pub struct App {
     pub eta_secs: Option<u64>,
     pub sys_info: SystemInfo,
     pub batch_size: usize,
+    /// Architecture reported by the backend's config detection, shown so the
+    /// operator can confirm the right model loaded before a long run.
+    pub model_architecture: Option<String>,
+    /// Quantization method the model declares, if it ships pre-quantized.
+    pub model_quantization: Option<String>,
     pub tokens_per_sec: f64,
     pub kl_history: Vec<f64>,
     pub refusal_history: Vec<f64>,
@@ -462,6 +467,8 @@ impl App {
             eta_secs: None,
             sys_info: SystemInfo::detect(),
             batch_size: 0,
+            model_architecture: None,
+            model_quantization: None,
             tokens_per_sec: 0.0,
             kl_history: Vec::new(),
             refusal_history: Vec::new(),
@@ -505,6 +512,32 @@ impl App {
                     SubprocessMessage::Event(event) => match event {
                         ParsedEvent::ModelLoading(msg) => {
                             self.log_lines.push((msg, LogLevel::Info));
+                        }
+                        ParsedEvent::ModelFormat {
+                            architecture,
+                            multimodal,
+                            remote_code,
+                        } => {
+                            let mut detail = architecture.clone();
+                            if multimodal {
+                                detail.push_str(" (multimodal)");
+                            }
+                            self.model_architecture = Some(detail.clone());
+                            self.log_lines
+                                .push((format!("Detected {}", detail), LogLevel::Info));
+                            if remote_code {
+                                // Worth its own line: loading this model runs code
+                                // from the model repository.
+                                self.log_lines.push((
+                                    "Model executes custom code from its repository".into(),
+                                    LogLevel::Warning,
+                                ));
+                            }
+                        }
+                        ParsedEvent::Quantization(method) => {
+                            self.model_quantization = Some(method.clone());
+                            self.log_lines
+                                .push((format!("Pre-quantized model: {}", method), LogLevel::Info));
                         }
                         ParsedEvent::BatchSize(size) => {
                             self.batch_size = size;
@@ -3088,7 +3121,7 @@ impl App {
         let sys_inner = sys_block.inner(right_chunks[0]);
         frame.render_widget(sys_block, right_chunks[0]);
 
-        let sys_lines: Vec<Line> = vec![
+        let mut sys_lines: Vec<Line> = vec![
             Line::from(vec![
                 Span::styled(" GPU: ", theme::dim_style()),
                 Span::styled(
@@ -3130,6 +3163,20 @@ impl App {
                 ),
             ]),
         ];
+
+        if let Some(architecture) = &self.model_architecture {
+            sys_lines.push(Line::from(vec![
+                Span::styled(" Arch: ", theme::dim_style()),
+                Span::styled(architecture.clone(), theme::highlight_value()),
+            ]));
+        }
+
+        if let Some(quantization) = &self.model_quantization {
+            sys_lines.push(Line::from(vec![
+                Span::styled(" Quant: ", theme::dim_style()),
+                Span::styled(quantization.clone(), theme::highlight_value()),
+            ]));
+        }
 
         let sys_text = Paragraph::new(sys_lines);
         frame.render_widget(sys_text, sys_inner);

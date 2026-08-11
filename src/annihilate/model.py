@@ -5,6 +5,7 @@
 import math
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Type, cast
 
 import torch
@@ -83,6 +84,87 @@ def get_model_class(
         return AutoModelForCausalLM
 
 
+# Pre-quantized formats we can load, mapped to the package that provides the
+# kernels. Transformers dispatches on `quant_method` in the model's own
+# config.json and raises if the backend is missing, so the value of detecting it
+# up front is naming the missing package instead of failing deep inside a load.
+QUANTIZATION_BACKENDS = {
+    "compressed-tensors": "compressed-tensors",
+    "fp8": "compressed-tensors",
+    "bitsandbytes": "bitsandbytes",
+    "gptq": "gptqmodel",
+    "awq": "autoawq",
+    "aqlm": "aqlm",
+    "hqq": "hqq",
+    "quanto": "optimum-quanto",
+    "eetq": "eetq",
+    "fbgemm_fp8": "fbgemm-gpu",
+    "torchao": "torchao",
+}
+
+
+@dataclass
+class ModelFormat:
+    """What a model reference is, determined before any weights are loaded."""
+
+    # Value of `quantization_config.quant_method`, or None for an unquantized model.
+    quantization: str | None
+    # Package providing the kernels, when we know which one it is.
+    backend: str | None
+    # True if the architecture is implemented in the repo rather than in
+    # transformers, which means loading it executes code from that repo.
+    remote_code: bool
+    multimodal: bool
+    architecture: str | None
+
+    @property
+    def is_prequantized(self) -> bool:
+        return self.quantization is not None
+
+
+def detect_model_format(model: str, **config_kwargs: Any) -> ModelFormat:
+    """Inspect a model's config to learn what loading it will require.
+
+    Reads config.json only. This is deliberately separate from loading so the
+    program can report an unavailable backend, or a repo that would execute its
+    own code, before spending minutes on a download.
+    """
+    configs = PretrainedConfig.get_config_dict(model, **config_kwargs)
+
+    quantization = None
+    for config in configs:
+        quantization_config = config.get("quantization_config")
+        if isinstance(quantization_config, dict):
+            method = quantization_config.get("quant_method")
+            if method is not None:
+                quantization = str(method).lower()
+                break
+
+    architectures = next(
+        (config["architectures"] for config in configs if config.get("architectures")),
+        None,
+    )
+
+    return ModelFormat(
+        quantization=quantization,
+        backend=QUANTIZATION_BACKENDS.get(quantization) if quantization else None,
+        remote_code=any(config.get("auto_map") for config in configs),
+        multimodal=any("vision_config" in config for config in configs),
+        architecture=architectures[0] if architectures else None,
+    )
+
+
+def _is_backend_installed(backend: str) -> bool:
+    # Distribution name, not import name: these differ often enough
+    # (compressed-tensors/compressed_tensors, autoawq/awq) that checking the
+    # metadata is more reliable than guessing the module.
+    try:
+        version(backend)
+    except PackageNotFoundError:
+        return False
+    return True
+
+
 def is_gguf_reference(model: str) -> bool:
     normalized = model.lower()
     return normalized.endswith(".gguf") or normalized.endswith("-gguf")
@@ -124,6 +206,9 @@ class Model:
                 "for llama.cpp-style inference and cannot be abliterated with "
                 "the PEFT/LoRA workflow."
             )
+
+        self.format = detect_model_format(settings.model, **self.revision_kwargs)
+        self._report_format()
 
         self.tokenizer = AutoTokenizer.from_pretrained(  # ty: ignore[invalid-assignment]
             settings.model,
@@ -344,6 +429,45 @@ class Model:
             f"* LoRA adapters initialized (target types: {', '.join(display_targets)})"
         )
 
+    def _report_format(self) -> None:
+        """Report what the model is, and fail early on anything we can't load."""
+        fmt = self.format
+
+        described = fmt.architecture or "unknown architecture"
+        if fmt.multimodal:
+            described += ", multimodal"
+        if fmt.remote_code:
+            described += ", custom code"
+        print(f"* Detected [bold]{described}[/]")
+
+        if fmt.remote_code and not self.settings.trust_remote_code:
+            # from_pretrained raises on its own, but only after the download.
+            print(
+                "[yellow]WARNING: This model implements its architecture in its "
+                "own repository. Loading it executes that code. Pass "
+                "--trust-remote-code if you have reviewed it.[/]"
+            )
+
+        if not fmt.is_prequantized:
+            return
+
+        print(f"* Pre-quantized model: [bold]{fmt.quantization}[/]")
+
+        if fmt.backend is None:
+            print(
+                f"[yellow]WARNING: Unrecognized quantization method "
+                f"'{fmt.quantization}'. Loading will fail if transformers cannot "
+                "dispatch it. Abliteration itself is format-agnostic, so a "
+                "loadable model should still work.[/]"
+            )
+        elif not _is_backend_installed(fmt.backend):
+            raise UnsupportedModelFormatError(
+                f"{self.settings.model} is quantized with "
+                f"'{fmt.quantization}', which needs the {fmt.backend} package. "
+                f'Install it with "pip install {fmt.backend}", or use an '
+                "unquantized version of this model."
+            )
+
     def _get_quantization_config(self, dtype: str) -> BitsAndBytesConfig | None:
         """
         Creates quantization config based on settings.
@@ -354,6 +478,17 @@ class Model:
         Returns:
             BitsAndBytesConfig or None
         """
+        if self.format.is_prequantized:
+            # The model carries its own quantization_config. Passing a second one
+            # either errors or silently re-quantizes already-quantized weights,
+            # and the model needs no help from us to load.
+            if self.settings.quantization == QuantizationMethod.BNB_4BIT:
+                print(
+                    f"[yellow]WARNING: Ignoring --quantization bnb_4bit because "
+                    f"this model is already quantized ({self.format.quantization}).[/]"
+                )
+            return None
+
         if self.settings.quantization == QuantizationMethod.BNB_4BIT:
             # BitsAndBytesConfig expects a torch.dtype, not a string.
             if dtype == "auto":
@@ -373,7 +508,11 @@ class Model:
         # Guard against calling this method at the wrong time.
         assert isinstance(self.model, PeftModel)
 
-        # Check if we need special handling for quantized models
+        # Only for quantization *we* applied. Reloading without a
+        # quantization_config recovers full precision precisely because the
+        # config came from settings; a pre-quantized repo declares it in its own
+        # config.json, so this path would just reload quantized weights. PEFT
+        # dequantizes those during merge instead - see below.
         if self.settings.quantization == QuantizationMethod.BNB_4BIT:
             # Quantized models need special handling - we must reload the base model
             # in full precision to merge the LoRA adapters
@@ -414,6 +553,16 @@ class Model:
             return merged_model
         else:
             # Non-quantized model - can merge directly
+            if self.format.is_prequantized:
+                # Merging materializes each targeted layer at full precision, so
+                # the export is no longer quantized and is substantially larger
+                # than the repo it came from. Say so before it lands on disk.
+                print(
+                    f"[yellow]NOTE: Merging dequantizes this "
+                    f"{self.format.quantization} model. The exported weights will "
+                    "be full precision and larger than the original. Export as an "
+                    "adapter instead to keep the quantized base.[/]"
+                )
             print("* Merging LoRA adapters into base model...")
             merged_model = self.model.merge_and_unload()
             # merge_and_unload() modifies self.model in-place, destroying LoRA adapters.

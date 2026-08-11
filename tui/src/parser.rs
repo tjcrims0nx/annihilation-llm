@@ -8,6 +8,14 @@
 pub enum ParsedEvent {
     /// Model is being loaded
     ModelLoading(String),
+    /// Architecture detected from the model's config, before weights load
+    ModelFormat {
+        architecture: String,
+        multimodal: bool,
+        remote_code: bool,
+    },
+    /// Model ships already quantized, with the method it declares
+    Quantization(String),
     /// Batch size was determined
     BatchSize(usize),
     /// Dataset loading status
@@ -102,6 +110,26 @@ pub fn parse_line(raw: &str) -> ParsedEvent {
     // Model loading
     if line.contains("Loading model") || line.contains("loading model") {
         return ParsedEvent::ModelLoading(line.clone());
+    }
+
+    // Format detection, emitted before the weights download. Matched ahead of the
+    // generic rules below because "* Detected 1 CUDA device(s)" would otherwise
+    // collide: require the architecture form specifically.
+    if let Some(rest) = line.strip_prefix("* Detected ")
+        && !rest.contains("CUDA")
+    {
+        let mut parts = rest.split(',').map(str::trim);
+        let architecture = parts.next().unwrap_or_default().to_string();
+        let flags: Vec<&str> = parts.collect();
+        return ParsedEvent::ModelFormat {
+            architecture,
+            multimodal: flags.contains(&"multimodal"),
+            remote_code: flags.contains(&"custom code"),
+        };
+    }
+
+    if let Some(method) = line.strip_prefix("* Pre-quantized model: ") {
+        return ParsedEvent::Quantization(method.trim().to_string());
     }
 
     // Batch size determination
@@ -312,6 +340,49 @@ mod tests {
         match parse_line(refusal_status) {
             ParsedEvent::Raw(line) => assert_eq!(line, refusal_status),
             other => panic!("Expected Raw JSON refusal status, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_model_format() {
+        match parse_line("* Detected LlamaForCausalLM") {
+            ParsedEvent::ModelFormat {
+                architecture,
+                multimodal: false,
+                remote_code: false,
+            } => assert_eq!(architecture, "LlamaForCausalLM"),
+            other => panic!("Expected ModelFormat, got {:?}", other),
+        }
+
+        match parse_line("* Detected CustomVLM, multimodal, custom code") {
+            ParsedEvent::ModelFormat {
+                architecture,
+                multimodal: true,
+                remote_code: true,
+            } => assert_eq!(architecture, "CustomVLM"),
+            other => panic!("Expected multimodal ModelFormat, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_cuda_detection_is_not_a_model_format() {
+        // "* Detected N CUDA device(s)" shares the prefix but is not an
+        // architecture line; misreading it would show "1 CUDA device(s)" as
+        // the model's architecture on the dashboard.
+        assert!(
+            !matches!(
+                parse_line("* Detected 1 CUDA device(s) (4.00 GB total VRAM)"),
+                ParsedEvent::ModelFormat { .. }
+            ),
+            "CUDA device line must not parse as a model format"
+        );
+    }
+
+    #[test]
+    fn test_parse_quantization() {
+        match parse_line("* Pre-quantized model: compressed-tensors") {
+            ParsedEvent::Quantization(method) => assert_eq!(method, "compressed-tensors"),
+            other => panic!("Expected Quantization, got {:?}", other),
         }
     }
 }
