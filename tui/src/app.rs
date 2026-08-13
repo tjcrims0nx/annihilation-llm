@@ -1924,28 +1924,46 @@ impl App {
                 let i = self.trial_list_state.selected().unwrap_or(0);
                 if i > 0 {
                     self.trial_list_state.select(Some(i - 1));
+                    if i - 1 < self.trials.len() {
+                        self.selected_trial_id = Some(self.trials[i - 1].index);
+                    }
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 let i = self.trial_list_state.selected().unwrap_or(0);
                 if i < self.trials.len().saturating_sub(1) {
                     self.trial_list_state.select(Some(i + 1));
+                    if i + 1 < self.trials.len() {
+                        self.selected_trial_id = Some(self.trials[i + 1].index);
+                    }
                 }
             }
             KeyCode::Enter => {
-                if self.trial_list_state.selected().is_some() {
+                let idx = self.trial_list_state.selected().unwrap_or(0);
+                if idx < self.trials.len() {
+                    let selected_trial = self.trials[idx].index;
+                    self.selected_trial_id = Some(selected_trial);
+                    self.status_message = format!(
+                        "Selected Trial {} (KL: {:.4}, Refusals: {})",
+                        selected_trial, self.trials[idx].kl_divergence, self.trials[idx].refusals
+                    );
+
                     self.screen = Screen::TrialActions;
                     self.current_menu = vec![
                         MenuItem::new("Save Model Locally", "Export merged model to a folder")
                             .with_key("S"),
+                        MenuItem::new("Chat with Model", "Test the decensored model").with_key("C"),
+                        MenuItem::new(
+                            "Run Benchmarks",
+                            "Evaluate with HellaSwag and ARC-Easy",
+                        )
+                        .with_key("B"),
+                        MenuItem::new("Convert to GGUF", "Export as a quantized GGUF file")
+                            .with_key("G"),
                         MenuItem::new("Upload to Hugging Face", "Push model to HF Hub")
                             .with_key("U"),
-                        MenuItem::new("Chat with Model", "Test the decensored model").with_key("C"),
-                        MenuItem::new("Run Benchmarks", "Evaluate with HellaSwag and ARC-Easy")
-                            .with_key("B"),
-                        MenuItem::new("Run More Trials", "Continue optimization").with_key("R"),
-                        MenuItem::new("Back to Results", "Return to trial selection")
-                            .with_key("Esc"),
+                        MenuItem::new("Delete Model", "Remove the checkpoint").with_key("D"),
+                        MenuItem::new("Back", "Return to Results").with_key("Esc"),
                     ];
                     self.menu_state.select(Some(0));
                 }
