@@ -768,7 +768,6 @@ impl App {
                             self.log_lines
                                 .push(("Optimization finished!".into(), LogLevel::Success));
                             self.is_processing = false;
-                            self.generate_demo_results(); // Still use demo results for now until the interactive menu parser is fully connected
                             self.switch_to_results();
                         }
                         ParsedEvent::GpuMemory { .. } => {}
@@ -1129,47 +1128,18 @@ impl App {
         }
     }
 
-    fn generate_demo_results(&mut self) {
-        self.trials = vec![
-            TrialResult {
-                index: 142,
-                refusals: 2,
-                total_prompts: 100,
-                kl_divergence: 0.0312,
-                direction: "global".into(),
-            },
-            TrialResult {
-                index: 87,
-                refusals: 0,
-                total_prompts: 100,
-                kl_divergence: 0.1247,
-                direction: "per layer".into(),
-            },
-            TrialResult {
-                index: 198,
-                refusals: 1,
-                total_prompts: 100,
-                kl_divergence: 0.0589,
-                direction: "global".into(),
-            },
-            TrialResult {
-                index: 56,
-                refusals: 3,
-                total_prompts: 100,
-                kl_divergence: 0.0201,
-                direction: "per layer".into(),
-            },
-            TrialResult {
-                index: 171,
-                refusals: 5,
-                total_prompts: 100,
-                kl_divergence: 0.0098,
-                direction: "global".into(),
-            },
-        ];
-    }
 
     fn switch_to_results(&mut self) {
+        if !self.model_input.is_empty() {
+            let sanitized = crate::subprocess::checkpoint_name(&self.model_input);
+            let checkpoint_path = crate::subprocess::repo_root()
+                .join("checkpoints")
+                .join(format!("{sanitized}.jsonl"));
+            let loaded = load_checkpoint_trials(&checkpoint_path);
+            if !loaded.is_empty() {
+                self.trials = loaded;
+            }
+        }
         self.screen = Screen::Results;
         self.trial_list_state.select(Some(0));
         self.current_menu = vec![
@@ -2398,7 +2368,6 @@ impl App {
             (true, ConfirmAction::StopProcessing) => {
                 self.is_processing = false;
                 if !self.trials.is_empty() || self.current_trial > 0 {
-                    self.generate_demo_results();
                     self.switch_to_results();
                 } else {
                     self.go_back_to_splash();
