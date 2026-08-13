@@ -88,7 +88,7 @@ jobs:
           path: dist
 
       - name: Publish
-        uses: pypa/gh-action-pypi-publish@v1
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
           # Lets a re-run finish the GHCR half without failing on a version
           # that is already live.
