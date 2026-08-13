@@ -1978,6 +1978,26 @@ impl App {
         }
     }
 
+    fn get_effective_trial_id(&mut self) -> usize {
+        if let Some(id) = self.selected_trial_id {
+            return id;
+        }
+
+        if self.trials.is_empty() && !self.model_input.is_empty() {
+            let sanitized = crate::subprocess::checkpoint_name(&self.model_input);
+            let checkpoint_path = crate::subprocess::repo_root()
+                .join("checkpoints")
+                .join(format!("{sanitized}.jsonl"));
+            self.trials = load_checkpoint_trials(&checkpoint_path);
+        }
+
+        self.trials
+            .iter()
+            .min_by_key(|t| (t.refusals, (t.kl_divergence * 10000.0) as u64))
+            .map(|t| t.index)
+            .unwrap_or(0)
+    }
+
     // ─── Trial Actions Keys ────────────────────────────────────
 
     fn handle_trial_actions_key(&mut self, key: KeyEvent) {
@@ -1990,13 +2010,7 @@ impl App {
                     match label.as_str() {
                         "Save Model Locally" => {
                             let sanitized = crate::subprocess::checkpoint_name(&self.model_input);
-                            let trial_id = self.selected_trial_id.unwrap_or_else(|| {
-                                self.trials
-                                    .iter()
-                                    .min_by_key(|t| (t.refusals, (t.kl_divergence * 10000.0) as u64))
-                                    .map(|t| t.index)
-                                    .unwrap_or(0)
-                            });
+                            let trial_id = self.get_effective_trial_id();
 
                             let default_folder = crate::subprocess::repo_root()
                                 .join("exports")
@@ -2007,13 +2021,7 @@ impl App {
                             self.screen = Screen::ExportFolderInput;
                         }
                         "Upload to Hugging Face" => {
-                            let trial_id = self.selected_trial_id.unwrap_or_else(|| {
-                                self.trials
-                                    .iter()
-                                    .min_by_key(|t| (t.refusals, (t.kl_divergence * 10000.0) as u64))
-                                    .map(|t| t.index)
-                                    .unwrap_or(0)
-                            });
+                            let trial_id = self.get_effective_trial_id();
 
                             let repo_id = if self.model_input.contains('/') {
                                 let parts: Vec<&str> = self.model_input.split('/').collect();

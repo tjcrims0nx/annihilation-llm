@@ -11,7 +11,6 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
