@@ -110,7 +110,10 @@ def main():
         )
         refusal_directions = F.normalize(refusal_directions, p=2, dim=1)
 
-    print("Applying abliteration parameters...")
+    if best_trial_params is None:
+        print("Error: No parameters found for trial.")
+        sys.exit(1)
+
     parameters = {k: AbliterationParameters(**v) for k, v in best_trial_params.items()}
     model.abliterate(refusal_directions, best_direction_index, parameters)
 
