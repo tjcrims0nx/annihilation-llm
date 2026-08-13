@@ -27,10 +27,10 @@ jobs:
 
     steps:
       - name: Check out this repo
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@v5
 
       - name: Resolve and verify version
         id: version
@@ -64,7 +64,7 @@ jobs:
         run: uvx twine check --strict dist/*
 
       - name: Upload distributions
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
@@ -82,13 +82,13 @@ jobs:
 
     steps:
       - name: Download distributions
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist
 
       - name: Publish
-        uses: pypa/gh-action-pypi-publish@v1.14.2
+        uses: pypa/gh-action-pypi-publish@v1
         with:
           # Lets a re-run finish the GHCR half without failing on a version
           # that is already live.
@@ -104,7 +104,7 @@ jobs:
 
     steps:
       - name: Download distributions
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: dist
           path: bundle/dist
@@ -125,17 +125,17 @@ jobs:
           echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4.2.0
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4.6.0
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@v7.3.0
+        uses: docker/build-push-action@v6
         with:
           context: bundle
           platforms: linux/amd64
