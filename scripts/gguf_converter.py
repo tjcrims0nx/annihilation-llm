@@ -243,7 +243,9 @@ def _install_package(package: str) -> None:
     sys.exit(1)
 
 
-def load_optimal_trial_and_merge(model_name: str) -> str:
+def load_optimal_trial_and_merge(
+    model_name: str, target_trial_id: int | None = None
+) -> str:
     # Needs to be able to import src
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from src.annihilate.utils import checkpoint_name_for_model
@@ -295,16 +297,24 @@ def load_optimal_trial_and_merge(model_name: str) -> str:
     best_refusals = float("inf")
     best_trial_id = -1
 
-    for trial_id, attrs in trials.items():
-        refusals = attrs.get("refusals", float("inf"))
-        kl = attrs.get("kl_divergence", float("inf"))
+    if target_trial_id is not None and target_trial_id in trials:
+        attrs = trials[target_trial_id]
+        best_refusals = attrs.get("refusals", float("inf"))
+        best_kl = attrs.get("kl_divergence", float("inf"))
+        best_trial_params = attrs.get("parameters")
+        best_direction_index = attrs.get("direction_index")
+        best_trial_id = target_trial_id
+    else:
+        for trial_id, attrs in trials.items():
+            refusals = attrs.get("refusals", float("inf"))
+            kl = attrs.get("kl_divergence", float("inf"))
 
-        if refusals < best_refusals or (refusals == best_refusals and kl < best_kl):
-            best_refusals = refusals
-            best_kl = kl
-            best_trial_params = attrs.get("parameters")
-            best_direction_index = attrs.get("direction_index")
-            best_trial_id = trial_id
+            if refusals < best_refusals or (refusals == best_refusals and kl < best_kl):
+                best_refusals = refusals
+                best_kl = kl
+                best_trial_params = attrs.get("parameters")
+                best_direction_index = attrs.get("direction_index")
+                best_trial_id = trial_id
 
     if not best_trial_params:
         print_event(
@@ -377,31 +387,30 @@ def _stream_output(proc: subprocess.Popen) -> int:
     return proc.wait()
 
 
-def convert_to_gguf(model_path: str, quant_type: str, output_path: str):
+def convert_to_gguf(
+    model_path: str,
+    quant_type: str,
+    output_path: str,
+    target_trial_id: int | None = None,
+):
     bin_dir = Path(__file__).parent / "llama_cpp_bin"
     quantize_exe, convert_py = ensure_llama_cpp(bin_dir)
 
     temp_merged_dir = None
     if not os.path.exists(model_path):
-        temp_merged_dir = load_optimal_trial_and_merge(model_path)
+        temp_merged_dir = load_optimal_trial_and_merge(
+            model_path, target_trial_id=target_trial_id
+        )
         model_path = temp_merged_dir
 
     try:
         # 1. Convert HF model to F16 GGUF.
-        # The intermediate always lives next to the target with a `-F16` suffix,
-        # even when the target itself is F16 (in which case the move below just
-        # renames it). Previously the suffix was computed from the target path,
-        # so an already-`-F16`-named target produced a duplicate `-F16-F16.gguf`
-        # that broke the move/cleanup below.
         if quant_type.upper() == "F16":
             f16_gguf = output_path
         else:
             stem = Path(output_path).stem
             f16_gguf = str(Path(output_path).parent / f"{stem}-temp-F16.gguf")
 
-        # Run convert_hf_to_gguf.py from its own directory so it can find the
-        # sibling `conversion` package, and set NO_LOCAL_GGUF so it uses the
-        # pip-installed gguf package instead of a local gguf-py/ directory.
         env = os.environ.copy()
         env["NO_LOCAL_GGUF"] = "1"
 
@@ -469,10 +478,13 @@ if __name__ == "__main__":
     parser.add_argument("--model-path", required=True)
     parser.add_argument("--quant-type", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--trial", "--trial-id", type=int, default=None)
     args = parser.parse_args()
 
     try:
-        convert_to_gguf(args.model_path, args.quant_type, args.output)
+        convert_to_gguf(
+            args.model_path, args.quant_type, args.output, target_trial_id=args.trial
+        )
     except Exception as e:
         print_event("error", str(e))
         sys.exit(1)

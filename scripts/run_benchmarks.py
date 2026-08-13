@@ -28,14 +28,15 @@ def print_event(event_type: str, content: str):
     print(json.dumps({"type": event_type, "content": content}), flush=True)
 
 
-def load_optimal_trial_and_merge(model_name: str) -> Model:
-    """Load the base model and reconstruct the best abliterated version from checkpoints."""
+def load_optimal_trial_and_merge(
+    model_name: str, target_trial_id: int | None = None
+) -> Model:
+    """Load the base model and reconstruct the selected/best abliterated version from checkpoints."""
     original_argv = sys.argv.copy()
     sys.argv = sys.argv[:1]
     base_settings = Settings(model=model_name)
     sys.argv = original_argv
 
-    # Must match how main.py names the file, or no checkpoint is ever found.
     sanitized = checkpoint_name_for_model(model_name)
     checkpoint_path = (
         Path(__file__).parent.parent
@@ -50,16 +51,11 @@ def load_optimal_trial_and_merge(model_name: str) -> Model:
         )
         sys.exit(1)
 
-    # Reconstructing a trial under different settings silently produces a
-    # different model, so reuse the settings the study was run with (including
-    # the pinned model_commit revision).
     settings = settings_from_checkpoint(str(checkpoint_path), model_name)
 
-    # Ensure batch_size is valid
     if settings.batch_size == 0:
         settings.batch_size = 16
 
-    # Ensure seed is valid (needed for torch.manual_seed in abliterate)
     if settings.seed is None:
         settings.seed = 42
 
@@ -69,22 +65,35 @@ def load_optimal_trial_and_merge(model_name: str) -> Model:
     best_direction_index = None
     best_kl = float("inf")
     best_refusals = float("inf")
+    best_trial_id = -1
 
-    for trial_id, attrs in trials.items():
-        refusals = attrs.get("refusals", float("inf"))
-        kl = attrs.get("kl_divergence", float("inf"))
+    if target_trial_id is not None and target_trial_id in trials:
+        attrs = trials[target_trial_id]
+        best_refusals = attrs.get("refusals", float("inf"))
+        best_kl = attrs.get("kl_divergence", float("inf"))
+        best_trial_params = attrs.get("parameters")
+        best_direction_index = attrs.get("direction_index")
+        best_trial_id = target_trial_id
+    else:
+        for trial_id, attrs in trials.items():
+            refusals = attrs.get("refusals", float("inf"))
+            kl = attrs.get("kl_divergence", float("inf"))
 
-        if refusals < best_refusals or (refusals == best_refusals and kl < best_kl):
-            best_refusals = refusals
-            best_kl = kl
-            best_trial_params = attrs.get("parameters")
-            best_direction_index = attrs.get("direction_index")
+            if refusals < best_refusals or (refusals == best_refusals and kl < best_kl):
+                best_refusals = refusals
+                best_kl = kl
+                best_trial_params = attrs.get("parameters")
+                best_direction_index = attrs.get("direction_index")
+                best_trial_id = trial_id
 
     if not best_trial_params:
         print_event("error", "No successful trials found in checkpoint.")
         sys.exit(1)
 
-    print_event("status", f"Loading model {model_name}...")
+    print_event(
+        "status",
+        f"Loading model {model_name} (Trial {best_trial_id}, KL Div: {best_kl:.4f})...",
+    )
     model = Model(settings)
 
     print_event("status", "Calculating refusal directions...")
@@ -112,19 +121,24 @@ def load_optimal_trial_and_merge(model_name: str) -> Model:
 
 
 def main():
-    if len(sys.argv) < 2:
-        print_event("error", "Missing model name argument")
-        sys.exit(1)
+    import argparse
 
-    model_name = sys.argv[1]
+    parser = argparse.ArgumentParser(description="Run benchmarks for Annihilation TUI")
+    parser.add_argument("model_name", nargs="?", default="openbmb/MiniCPM5-1B")
+    parser.add_argument("benchmarks", nargs="?", default="hellaswag,arc_easy")
+    parser.add_argument("--trial", "--trial-id", type=int, default=None)
+    args, _ = parser.parse_known_args()
 
-    # Default benchmarks if none specified
-    benchmarks = ["hellaswag", "arc_easy"]
-    if len(sys.argv) > 2:
-        benchmarks = sys.argv[2].split(",")
+    model_name = args.model_name
+    benchmarks = (
+        args.benchmarks.split(",") if args.benchmarks else ["hellaswag", "arc_easy"]
+    )
+    target_trial_id = args.trial
 
     try:
-        model = load_optimal_trial_and_merge(model_name)
+        model = load_optimal_trial_and_merge(
+            model_name, target_trial_id=target_trial_id
+        )
 
         # Initialize lm-eval wrapper
         print_event("status", "Initializing evaluation harness...")

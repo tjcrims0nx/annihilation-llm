@@ -2055,32 +2055,37 @@ impl App {
                             ));
                         }
                         "Chat with Model" => {
+                            let trial_id = self.get_effective_trial_id();
                             self.screen = Screen::Chat;
                             self.chat_messages.clear();
                             self.chat_input.clear();
                             self.chat_loading = true;
                             self.chat_streaming = false;
-                            self.status_message = "Starting chat server...".to_string();
+                            self.status_message = format!("Starting chat server (Trial {})...", trial_id);
                             self.chat_messages.push((
                                 "system".to_string(),
-                                "Starting chat server... Reconstructing annihilated model from checkpoint.".to_string(),
+                                format!(
+                                    "Starting chat server... Reconstructing trial {} from checkpoint.",
+                                    trial_id
+                                ),
                             ));
                             self.chat_subprocess =
-                                Some(SubprocessManager::spawn_chat_server(&self.model_input));
+                                Some(SubprocessManager::spawn_chat_server(&self.model_input, Some(trial_id)));
                         }
                         "Run Benchmarks" => {
+                            let trial_id = self.get_effective_trial_id();
                             self.screen = Screen::BenchmarkDashboard;
                             self.benchmark_running = true;
                             self.benchmark_results.clear();
                             self.log_lines.clear();
                             self.log_lines.push((
-                                "Starting benchmarks on annihilated model...".to_string(),
+                                format!("Starting benchmarks on trial {}...", trial_id),
                                 LogLevel::Info,
                             ));
                             self.benchmark_subprocess =
-                                Some(SubprocessManager::spawn_benchmark(&self.model_input));
+                                Some(SubprocessManager::spawn_benchmark(&self.model_input, Some(trial_id)));
                             self.status_message =
-                                "Running benchmarks... This may take a while.".to_string();
+                                format!("Running benchmarks (Trial {})... This may take a while.", trial_id);
                         }
                         "Run More Trials" => { /* More trials */ }
                         "Convert to GGUF" => {
@@ -2266,16 +2271,10 @@ impl App {
                     let checkpoint_path = crate::subprocess::repo_root()
                         .join("checkpoints")
                         .join(format!("{sanitized}.jsonl"));
+                    let trial_id = self.get_effective_trial_id();
                     let output_dir = crate::subprocess::repo_root()
                         .join("exports")
-                        .join(format!("{sanitized}-merged"));
-
-                    let trial_id = self
-                        .trials
-                        .iter()
-                        .min_by_key(|t| (t.refusals, (t.kl_divergence * 10000.0) as u64))
-                        .map(|t| t.index)
-                        .unwrap_or(0);
+                        .join(format!("{sanitized}-merged-trial{trial_id}"));
 
                     self.is_processing = true;
                     self.log_lines.clear();
@@ -2338,21 +2337,24 @@ impl App {
                     }
                 }
 
+                let trial_id = self.get_effective_trial_id();
                 self.is_processing = true;
                 self.log_lines.clear();
-                let msg = format!("Starting GGUF conversion (Size: {})...", self.gguf_size);
+                let msg = format!(
+                    "Starting GGUF conversion (Trial {}, Size: {})...",
+                    trial_id, self.gguf_size
+                );
                 self.log_lines.push((msg, LogLevel::Info));
                 self.screen = Screen::Processing;
 
-                // Spawn the subprocess using the gguf converter script
-                // We'll pass the model input name for now as a placeholder
                 self.gguf_output = Some(crate::subprocess::gguf_output_path(
                     &self.model_input,
                     &self.gguf_size,
                 ));
-                self.subprocess = Some(crate::subprocess::SubprocessManager::spawn_gguf_convert(
+                self.subprocess = Some(crate::subprocess::SubprocessManager::spawn_gguf_converter(
                     &self.model_input,
                     &self.gguf_size,
+                    Some(trial_id),
                 ));
             }
             KeyCode::Esc => {

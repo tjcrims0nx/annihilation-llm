@@ -312,7 +312,11 @@ impl SubprocessManager {
     }
 
     /// Spawns the python script for converting a model to GGUF format
-    pub fn spawn_gguf_convert(model_path: &str, quant_type: &str) -> Self {
+    pub fn spawn_gguf_converter(
+        model_path: &str,
+        quant_type: &str,
+        trial_id: Option<usize>,
+    ) -> Self {
         let (tx, rx) = mpsc::channel::<SubprocessMessage>();
 
         let root = repo_root();
@@ -328,6 +332,10 @@ impl SubprocessManager {
         cmd.arg("--model-path").arg(model_path);
         cmd.arg("--quant-type").arg(quant_type);
         cmd.arg("--output").arg(&output_path);
+
+        if let Some(tid) = trial_id {
+            cmd.arg("--trial").arg(tid.to_string());
+        }
 
         cmd.current_dir(&root);
         cmd.stdout(Stdio::piped());
@@ -584,7 +592,7 @@ impl SubprocessManager {
     }
 
     /// Spawns the python chat server script
-    pub fn spawn_chat_server(model_name: &str) -> Self {
+    pub fn spawn_chat_server(model_name: &str, trial_id: Option<usize>) -> Self {
         let (tx, rx) = mpsc::channel::<SubprocessMessage>();
 
         let root = repo_root();
@@ -594,6 +602,10 @@ impl SubprocessManager {
         cmd.arg("-u");
         cmd.arg("scripts/chat_server.py");
         cmd.arg(model_name);
+
+        if let Some(tid) = trial_id {
+            cmd.arg("--trial").arg(tid.to_string());
+        }
 
         cmd.current_dir(&root);
         cmd.stdout(Stdio::piped());
@@ -681,7 +693,7 @@ impl SubprocessManager {
     }
 
     /// Spawns the python benchmark script
-    pub fn spawn_benchmark(model_name: &str) -> Self {
+    pub fn spawn_benchmark(model_name: &str, trial_id: Option<usize>) -> Self {
         let (tx, rx) = mpsc::channel::<SubprocessMessage>();
 
         let root = repo_root();
@@ -691,6 +703,10 @@ impl SubprocessManager {
         cmd.arg("-u");
         cmd.arg("scripts/run_benchmarks.py");
         cmd.arg(model_name);
+
+        if let Some(tid) = trial_id {
+            cmd.arg("--trial").arg(tid.to_string());
+        }
 
         cmd.current_dir(&root);
         cmd.stdout(Stdio::piped());
