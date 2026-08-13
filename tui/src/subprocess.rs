@@ -413,6 +413,86 @@ impl SubprocessManager {
         }
     }
 
+    /// Spawns the python script for exporting a merged model
+    pub fn spawn_export(checkpoint_path: &str, trial_id: usize, output_dir: &str) -> Self {
+        let (tx, rx) = mpsc::channel::<SubprocessMessage>();
+
+        let root = repo_root();
+        let python = python_exe();
+
+        let mut cmd = Command::new(&python);
+        cmd.arg("-u");
+        cmd.arg("-m");
+        cmd.arg("annihilate.export");
+        cmd.arg("--checkpoint").arg(checkpoint_path);
+        cmd.arg("--trial-id").arg(trial_id.to_string());
+        cmd.arg("--output").arg(output_dir);
+
+        cmd.current_dir(&root);
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        cmd.stdin(Stdio::piped());
+        cmd.env("PYTHONIOENCODING", "utf-8");
+        cmd.env("PYTHONUNBUFFERED", "1");
+        cmd.env("PYTHONWARNINGS", "ignore");
+
+        match cmd.spawn() {
+            Ok(mut child) => {
+                let stdout = child.stdout.take();
+                let stderr = child.stderr.take();
+
+                if let Some(stdout) = stdout {
+                    let tx_out = tx.clone();
+                    thread::spawn(move || {
+                        let reader = BufReader::new(stdout);
+                        for line in reader.lines() {
+                            match line {
+                                Ok(text) => {
+                                    let event = parser::parse_line(&text);
+                                    let _ = tx_out.send(SubprocessMessage::Event(event));
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                    });
+                }
+
+                if let Some(stderr) = stderr {
+                    let tx_err = tx.clone();
+                    thread::spawn(move || {
+                        let reader = BufReader::new(stderr);
+                        for line in reader.lines() {
+                            match line {
+                                Ok(text) => {
+                                    let event = parser::parse_line(&text);
+                                    let _ = tx_err.send(SubprocessMessage::Event(event));
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                    });
+                }
+
+                Self {
+                    rx,
+                    child: Some(child),
+                    stdin_tx: None,
+                }
+            }
+            Err(e) => {
+                let _ = tx.send(SubprocessMessage::SpawnError(format!(
+                    "Failed to start export: {}",
+                    e
+                )));
+                Self {
+                    rx,
+                    child: None,
+                    stdin_tx: None,
+                }
+            }
+        }
+    }
+
     /// Spawns the python chat server script
     pub fn spawn_chat_server(model_name: &str) -> Self {
         let (tx, rx) = mpsc::channel::<SubprocessMessage>();

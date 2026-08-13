@@ -2001,9 +2001,38 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') => self.menu_down(),
             KeyCode::Enter => match self.menu_state.selected() {
                 Some(0) | Some(1) => {
-                    self.status_message = "Model export complete!".to_string();
-                    self.screen = Screen::TrialActions;
-                    self.menu_state.select(Some(0));
+                    let sanitized = crate::subprocess::checkpoint_name(&self.model_input);
+                    let checkpoint_path = crate::subprocess::repo_root()
+                        .join("checkpoints")
+                        .join(format!("{sanitized}.jsonl"));
+                    let output_dir = crate::subprocess::repo_root()
+                        .join("exports")
+                        .join(format!("{sanitized}-merged"));
+
+                    let trial_id = self
+                        .trials
+                        .iter()
+                        .min_by_key(|t| (t.refusals, (t.kl_divergence * 10000.0) as u64))
+                        .map(|t| t.index)
+                        .unwrap_or(0);
+
+                    self.is_processing = true;
+                    self.log_lines.clear();
+                    self.log_lines.push((
+                        format!(
+                            "Exporting merged model (Trial {}) to {}...",
+                            trial_id,
+                            output_dir.display()
+                        ),
+                        LogLevel::Info,
+                    ));
+                    self.screen = Screen::Processing;
+
+                    self.subprocess = Some(SubprocessManager::spawn_export(
+                        &checkpoint_path.to_string_lossy(),
+                        trial_id,
+                        &output_dir.to_string_lossy(),
+                    ));
                 }
                 Some(2) => {
                     self.screen = Screen::GgufSizeSelect;

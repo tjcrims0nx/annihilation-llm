@@ -13,6 +13,10 @@ import sys
 from pathlib import Path
 
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+
 # Provide rich JSON output for TUI parsing
 def print_event(level: str, msg: str):
     print(json.dumps({"level": level, "message": msg}), flush=True)
