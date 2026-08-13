@@ -181,7 +181,7 @@ fn load_checkpoint_trials(path: &std::path::Path) -> Vec<TrialResult> {
         return Vec::new();
     };
 
-    let mut trials_map: std::collections::HashMap<usize, (usize, usize, f64)> =
+    let mut raw_trials: std::collections::HashMap<usize, serde_json::Value> =
         std::collections::HashMap::new();
 
     for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
@@ -190,32 +190,41 @@ fn load_checkpoint_trials(path: &std::path::Path) -> Vec<TrialResult> {
         };
 
         if val.get("op_code").and_then(|c| c.as_u64()) == Some(8) {
-            let trial_id = val.get("trial_id").and_then(|t| t.as_u64()).unwrap_or(0) as usize;
-            if let Some(user_attr) = val.get("user_attr") {
-                if let (Some(refusals), Some(kl)) = (
-                    user_attr.get("refusals").and_then(|r| r.as_u64()),
-                    user_attr.get("kl_divergence").and_then(|k| k.as_f64()),
-                ) {
-                    let total = user_attr
-                        .get("n_bad_prompts")
-                        .and_then(|n| n.as_u64())
-                        .unwrap_or(100) as usize;
-                    trials_map.insert(trial_id, (refusals as usize, total, kl));
+            if let (Some(trial_id), Some(user_attr)) = (
+                val.get("trial_id").and_then(|t| t.as_u64()).map(|t| t as usize),
+                val.get("user_attr").and_then(|u| u.as_object()),
+            ) {
+                let entry = raw_trials.entry(trial_id).or_insert_with(|| serde_json::json!({}));
+                if let Some(map) = entry.as_object_mut() {
+                    for (k, v) in user_attr {
+                        map.insert(k.clone(), v.clone());
+                    }
                 }
             }
         }
     }
 
-    let mut results: Vec<TrialResult> = trials_map
-        .into_iter()
-        .map(|(trial_id, (refusals, total_prompts, kl_divergence))| TrialResult {
-            index: trial_id,
-            refusals,
-            total_prompts,
-            kl_divergence,
-            direction: "Residual".to_string(),
-        })
-        .collect();
+    let mut results: Vec<TrialResult> = Vec::new();
+
+    for (trial_id, attrs) in raw_trials {
+        if let (Some(refusals), Some(kl)) = (
+            attrs.get("refusals").and_then(|r| r.as_u64()),
+            attrs.get("kl_divergence").and_then(|k| k.as_f64()),
+        ) {
+            let total = attrs
+                .get("n_bad_prompts")
+                .and_then(|n| n.as_u64())
+                .unwrap_or(100) as usize;
+
+            results.push(TrialResult {
+                index: trial_id,
+                refusals: refusals as usize,
+                total_prompts: total,
+                kl_divergence: kl,
+                direction: "Residual".to_string(),
+            });
+        }
+    }
 
     results.sort_by(|a, b| {
         a.refusals
