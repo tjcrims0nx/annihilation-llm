@@ -390,8 +390,11 @@ def convert_to_gguf(model_path: str, quant_type: str, output_path: str):
         # renames it). Previously the suffix was computed from the target path,
         # so an already-`-F16`-named target produced a duplicate `-F16-F16.gguf`
         # that broke the move/cleanup below.
-        print_event("info", f"Converting {model_path} to F16 GGUF...")
-        f16_gguf = str(Path(output_path).with_suffix("")) + "-F16.gguf"
+        if quant_type.upper() == "F16":
+            f16_gguf = output_path
+        else:
+            stem = Path(output_path).stem
+            f16_gguf = str(Path(output_path).parent / f"{stem}-temp-F16.gguf")
 
         # Run convert_hf_to_gguf.py from its own directory so it can find the
         # sibling `conversion` package, and set NO_LOCAL_GGUF so it uses the
@@ -426,7 +429,8 @@ def convert_to_gguf(model_path: str, quant_type: str, output_path: str):
             sys.exit(1)
 
         if quant_type.upper() == "F16":
-            shutil.move(f16_gguf, output_path)
+            if f16_gguf != output_path:
+                shutil.move(f16_gguf, output_path)
             print_event("info", f"GGUF conversion complete: {output_path}")
             return
 

@@ -788,6 +788,18 @@ impl App {
                                     extra_args.push("--no-use-ega".to_string());
                                 }
 
+                                if self.use_obliteratus {
+                                    self.log_lines.push((
+                                        "⚡ OBLITERATUS Mode Active: Gaussian Kernel | COSMIC Layer Selection | MoE EGA".to_string(),
+                                        LogLevel::Success,
+                                    ));
+                                } else {
+                                    self.log_lines.push((
+                                        "Mode: Standard (Linear Kernel)".to_string(),
+                                        LogLevel::Info,
+                                    ));
+                                }
+
                                 self.subprocess =
                                     Some(SubprocessManager::spawn(&self.model_input, &extra_args));
                             } else {
