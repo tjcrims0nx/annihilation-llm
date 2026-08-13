@@ -1334,29 +1334,9 @@ impl App {
                     let loaded_trials = load_checkpoint_trials(&checkpoint_path);
                     if !loaded_trials.is_empty() {
                         self.trials = loaded_trials;
-                        self.screen = Screen::TrialSelection;
-
-                        let mut menu_items: Vec<MenuItem> = self
-                            .trials
-                            .iter()
-                            .map(|t| {
-                                MenuItem::new(
-                                    &format!(
-                                        "Trial {} | Refusals: {}/{} | KL: {:.4}",
-                                        t.index, t.refusals, t.total_prompts, t.kl_divergence
-                                    ),
-                                    &format!(
-                                        "Refusal rate {}/{} — KL Divergence {:.4}",
-                                        t.refusals, t.total_prompts, t.kl_divergence
-                                    ),
-                                )
-                            })
-                            .collect();
-
-                        menu_items
-                            .push(MenuItem::new("Back", "Return to Completed Models").with_key("Esc"));
-                        self.current_menu = menu_items;
-                        self.menu_state.select(Some(0));
+                        self.trial_list_state.select(Some(0));
+                        self.selected_trial_id = Some(self.trials[0].index);
+                        self.screen = Screen::Results;
                     } else {
                         self.screen = Screen::TrialActions;
                         self.current_menu = vec![
