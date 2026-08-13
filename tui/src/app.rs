@@ -3137,10 +3137,15 @@ impl App {
         } else {
             0.0
         };
+        let gauge_label = if self.current_trial == 0 {
+            format!(" Initializing... (0/{}) ", self.total_trials)
+        } else {
+            format!(" Trials: {}/{} ", self.current_trial, self.total_trials)
+        };
         let gauge = Gauge::default()
             .gauge_style(theme::gauge_style())
             .label(Span::styled(
-                format!(" Trials: {}/{} ", self.current_trial, self.total_trials),
+                gauge_label,
                 Style::default()
                     .fg(theme::TEXT_BRIGHT)
                     .add_modifier(Modifier::BOLD),

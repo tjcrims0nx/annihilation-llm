@@ -31,8 +31,10 @@ pub fn repo_root() -> PathBuf {
 fn python_exe() -> PathBuf {
     let root = repo_root();
 
-    // Check multiple common venv names
-    let venv_names = [".venv", "annihilation-env", "venv", "env"];
+    // Check multiple common venv names — annihilation-env first, matching the
+    // priority in spawn_setup()'s PowerShell block.  Both directories may exist
+    // (uv creates .venv by default), so the order matters.
+    let venv_names = ["annihilation-env", ".venv", "venv", "env"];
 
     for venv in venv_names.iter() {
         let path = root.join(venv).join("Scripts").join("python.exe");
