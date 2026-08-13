@@ -235,6 +235,23 @@ class Model:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
+        # Fallback for tokenizers that don't declare a chat_template.
+        if getattr(self.tokenizer, "chat_template", None) is None:
+            self.tokenizer.chat_template = (
+                "{% for message in messages %}"
+                "{% if message['role'] == 'system' %}"
+                "{{ '<|im_start|>system\n' + message['content'] + '<|im_end|>\n' }}"
+                "{% elif message['role'] == 'user' %}"
+                "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
+                "{% elif message['role'] == 'assistant' %}"
+                "{{ '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}"
+                "{% endif %}"
+                "{% endfor %}"
+                "{% if add_generation_prompt %}"
+                "{{ '<|im_start|>assistant\n' }}"
+                "{% endif %}"
+            )
+
         # CRITICAL: Always use left-padding for decoder-only models during generation.
         #           Right-padding causes empty outputs because the model sees PAD tokens
         #           after the prompt and thinks the sequence is complete.
