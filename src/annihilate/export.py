@@ -12,7 +12,6 @@ import json
 import sys
 from pathlib import Path
 
-
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
@@ -220,10 +219,17 @@ def export_model(checkpoint_path: str, trial_id: int, output_dir: str):
         output_path.mkdir(parents=True, exist_ok=True)
 
         print_event("info", f"Saving merged model to {output_path}...")
-        merged.save_pretrained(output_path, max_shard_size=settings.max_shard_size)
+        merged.save_pretrained(
+            output_path, max_shard_size=settings.max_shard_size or "10GB"
+        )
         model.tokenizer.save_pretrained(output_path)
-        if model.processor is not None:
+        if getattr(model, "processor", None) is not None:
             model.processor.save_pretrained(output_path)
+        if getattr(merged, "generation_config", None) is not None:
+            try:
+                merged.generation_config.save_pretrained(output_path)
+            except Exception:
+                pass
 
         del merged
     finally:

@@ -30,6 +30,9 @@ ROOT_DIR = Path(__file__).parent.parent.resolve()
 def main():
     parser = argparse.ArgumentParser(description="Upload annihilated model to HF")
     parser.add_argument(
+        "--model-name", type=str, default=MODEL_NAME, help="Base model name or ID"
+    )
+    parser.add_argument(
         "--trial", type=int, default=179, help="Trial ID to export (e.g. 179, 196)"
     )
     parser.add_argument(
@@ -39,6 +42,7 @@ def main():
 
     repo_id = args.repo
     target_trial_id = args.trial
+    model_name = args.model_name
 
     print(f"=== ANNIHILATION-LLM: Upload to HuggingFace ({repo_id}) ===")
 
@@ -46,7 +50,7 @@ def main():
     user_info = api.whoami()
     print(f"Authenticated as: {user_info['name']}")
 
-    sanitized = checkpoint_name_for_model(MODEL_NAME)
+    sanitized = checkpoint_name_for_model(model_name)
     checkpoint_path = ROOT_DIR / "checkpoints" / f"{sanitized}.jsonl"
 
     if not checkpoint_path.exists():
@@ -54,7 +58,7 @@ def main():
         sys.exit(1)
 
     print(f"Reading checkpoint: {checkpoint_path}")
-    settings = settings_from_checkpoint(str(checkpoint_path), MODEL_NAME)
+    settings = settings_from_checkpoint(str(checkpoint_path), model_name)
 
     if settings.batch_size == 0:
         settings.batch_size = 16

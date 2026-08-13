@@ -55,6 +55,8 @@ pub enum Screen {
     Export,
     GgufSizeSelect,
     CompletedModels,
+    TrialSelection,
+    ExportFolderInput,
     CheckpointPrompt,
     BenchmarkDashboard,
     Confirm(ConfirmAction),
@@ -169,6 +171,59 @@ fn model_name_from_checkpoint(path: &std::path::Path) -> String {
     }
 
     fallback()
+}
+
+/// Load and parse all completed trial attributes from a checkpoint file,
+/// sorted by refusal count ascending, then by KL divergence ascending.
+fn load_checkpoint_trials(path: &std::path::Path) -> Vec<TrialResult> {
+    use std::io::BufRead;
+    let Ok(file) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+
+    let mut trials_map: std::collections::HashMap<usize, (usize, usize, f64)> =
+        std::collections::HashMap::new();
+
+    for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+
+        if val.get("op_code").and_then(|c| c.as_u64()) == Some(8) {
+            let trial_id = val.get("trial_id").and_then(|t| t.as_u64()).unwrap_or(0) as usize;
+            if let Some(user_attr) = val.get("user_attr") {
+                if let (Some(refusals), Some(kl)) = (
+                    user_attr.get("refusals").and_then(|r| r.as_u64()),
+                    user_attr.get("kl_divergence").and_then(|k| k.as_f64()),
+                ) {
+                    let total = user_attr
+                        .get("n_bad_prompts")
+                        .and_then(|n| n.as_u64())
+                        .unwrap_or(100) as usize;
+                    trials_map.insert(trial_id, (refusals as usize, total, kl));
+                }
+            }
+        }
+    }
+
+    let mut results: Vec<TrialResult> = trials_map
+        .into_iter()
+        .map(|(trial_id, (refusals, total_prompts, kl_divergence))| TrialResult {
+            index: trial_id,
+            refusals,
+            total_prompts,
+            kl_divergence,
+            direction: "Residual".to_string(),
+        })
+        .collect();
+
+    results.sort_by(|a, b| {
+        a.refusals
+            .cmp(&b.refusals)
+            .then_with(|| a.kl_divergence.partial_cmp(&b.kl_divergence).unwrap_or(std::cmp::Ordering::Equal))
+    });
+
+    results
 }
 
 /// Mask a secret for display, revealing at most the first 3 *characters*.
@@ -442,6 +497,11 @@ pub struct App {
     pub hf_token_input: String,
     pub hf_token_cursor: usize,
 
+    // Export folder input
+    pub selected_trial_id: Option<usize>,
+    pub export_folder_input: String,
+    pub export_folder_cursor: usize,
+
     // Processing state
     pub is_processing: bool,
     pub is_setting_up: bool,
@@ -532,6 +592,9 @@ impl App {
             model_error: None,
             hf_token_input: std::env::var("HF_TOKEN").unwrap_or_default(),
             hf_token_cursor: char_len(&std::env::var("HF_TOKEN").unwrap_or_default()),
+            selected_trial_id: None,
+            export_folder_input: String::new(),
+            export_folder_cursor: 0,
             is_processing: false,
             is_setting_up: false,
             subprocess: None,
@@ -1134,6 +1197,8 @@ impl App {
             Screen::BenchmarkDashboard => self.handle_benchmark_dashboard_key(key),
             Screen::Export => self.handle_export_key(key),
             Screen::CompletedModels => self.handle_completed_models_key(key),
+            Screen::TrialSelection => self.handle_trial_selection_key(key),
+            Screen::ExportFolderInput => self.handle_export_folder_input_key(key),
             Screen::GgufSizeSelect => self.handle_gguf_size_select_key(key),
             Screen::CheckpointPrompt => self.handle_checkpoint_prompt_key(key),
             Screen::Confirm(action) => self.handle_confirm_key(key, action.clone()),
@@ -1279,27 +1344,178 @@ impl App {
             KeyCode::Enter => {
                 let idx = self.menu_state.selected().unwrap_or(0);
                 if idx < self.current_menu.len().saturating_sub(1) {
-                    // Selected a model
-                    self.model_input = self.current_menu[idx].label.clone();
+                    let model_name = self.current_menu[idx].label.clone();
+                    self.model_input = model_name.clone();
+
+                    let sanitized = crate::subprocess::checkpoint_name(&model_name);
+                    let checkpoint_path = crate::subprocess::repo_root()
+                        .join("checkpoints")
+                        .join(format!("{sanitized}.jsonl"));
+
+                    let loaded_trials = load_checkpoint_trials(&checkpoint_path);
+                    if !loaded_trials.is_empty() {
+                        self.trials = loaded_trials;
+                        self.screen = Screen::TrialSelection;
+
+                        let mut menu_items: Vec<MenuItem> = self
+                            .trials
+                            .iter()
+                            .map(|t| {
+                                MenuItem::new(
+                                    &format!(
+                                        "Trial {} | Refusals: {}/{} | KL: {:.4}",
+                                        t.index, t.refusals, t.total_prompts, t.kl_divergence
+                                    ),
+                                    &format!(
+                                        "Refusal rate {}/{} — KL Divergence {:.4}",
+                                        t.refusals, t.total_prompts, t.kl_divergence
+                                    ),
+                                )
+                            })
+                            .collect();
+
+                        menu_items
+                            .push(MenuItem::new("Back", "Return to Completed Models").with_key("Esc"));
+                        self.current_menu = menu_items;
+                        self.menu_state.select(Some(0));
+                    } else {
+                        self.screen = Screen::TrialActions;
+                        self.current_menu = vec![
+                            MenuItem::new("Save Model Locally", "Export merged model to a folder")
+                                .with_key("S"),
+                            MenuItem::new("Chat with Model", "Test the decensored model").with_key("C"),
+                            MenuItem::new(
+                                "Run Benchmarks",
+                                "Evaluate with HellaSwag and ARC-Easy",
+                            )
+                            .with_key("B"),
+                            MenuItem::new("Convert to GGUF", "Export as a quantized GGUF file")
+                                .with_key("G"),
+                            MenuItem::new("Upload to Hugging Face", "Push model to HF Hub")
+                                .with_key("U"),
+                            MenuItem::new("Delete Model", "Remove the checkpoint").with_key("D"),
+                            MenuItem::new("Back", "Return to Completed Models").with_key("Esc"),
+                        ];
+                        self.menu_state.select(Some(0));
+                    }
+                } else {
+                    self.go_back_to_splash();
+                }
+            }
+            KeyCode::Esc => self.go_back_to_splash(),
+            _ => {}
+        }
+    }
+
+    // ─── Trial Selection Keys ──────────────────────────────────
+
+    fn handle_trial_selection_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => self.menu_up(),
+            KeyCode::Down | KeyCode::Char('j') => self.menu_down(),
+            KeyCode::Enter => {
+                let idx = self.menu_state.selected().unwrap_or(0);
+                if idx < self.trials.len() {
+                    let selected_trial = self.trials[idx].index;
+                    self.selected_trial_id = Some(selected_trial);
+                    self.status_message = format!(
+                        "Selected Trial {} (KL: {:.4}, Refusals: {})",
+                        selected_trial, self.trials[idx].kl_divergence, self.trials[idx].refusals
+                    );
+
                     self.screen = Screen::TrialActions;
                     self.current_menu = vec![
+                        MenuItem::new("Save Model Locally", "Export merged model to a folder")
+                            .with_key("S"),
                         MenuItem::new("Chat with Model", "Test the decensored model").with_key("C"),
-                        MenuItem::new("Run Benchmarks", "Evaluate with HellaSwag and ARC-Easy")
-                            .with_key("B"),
+                        MenuItem::new(
+                            "Run Benchmarks",
+                            "Evaluate with HellaSwag and ARC-Easy",
+                        )
+                        .with_key("B"),
                         MenuItem::new("Convert to GGUF", "Export as a quantized GGUF file")
                             .with_key("G"),
                         MenuItem::new("Upload to Hugging Face", "Push model to HF Hub")
                             .with_key("U"),
                         MenuItem::new("Delete Model", "Remove the checkpoint").with_key("D"),
-                        MenuItem::new("Back", "Return to Completed Models").with_key("Esc"),
+                        MenuItem::new("Back", "Return to Trial Selection").with_key("Esc"),
                     ];
                     self.menu_state.select(Some(0));
                 } else {
-                    // Back
-                    self.go_back_to_splash();
+                    self.screen = Screen::CompletedModels;
+                    self.menu_state.select(Some(0));
                 }
             }
-            KeyCode::Esc => self.go_back_to_splash(),
+            KeyCode::Esc => {
+                self.screen = Screen::CompletedModels;
+                self.menu_state.select(Some(0));
+            }
+            _ => {}
+        }
+    }
+
+    // ─── Export Folder Input Keys ────────────────────────────────
+
+    fn handle_export_folder_input_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Enter => {
+                let target_dir = self.export_folder_input.trim().to_string();
+                if !target_dir.is_empty() {
+                    let sanitized = crate::subprocess::checkpoint_name(&self.model_input);
+                    let checkpoint_path = crate::subprocess::repo_root()
+                        .join("checkpoints")
+                        .join(format!("{sanitized}.jsonl"));
+
+                    let trial_id = self.selected_trial_id.unwrap_or_else(|| {
+                        self.trials
+                            .iter()
+                            .min_by_key(|t| (t.refusals, (t.kl_divergence * 10000.0) as u64))
+                            .map(|t| t.index)
+                            .unwrap_or(0)
+                    });
+
+                    self.is_processing = true;
+                    self.log_lines.clear();
+                    self.log_lines.push((
+                        format!("Exporting merged model (Trial {}) to {}...", trial_id, target_dir),
+                        LogLevel::Info,
+                    ));
+                    self.screen = Screen::Processing;
+
+                    self.subprocess = Some(SubprocessManager::spawn_export(
+                        &checkpoint_path.to_string_lossy(),
+                        trial_id,
+                        &target_dir,
+                    ));
+                }
+            }
+            KeyCode::Char(c) => {
+                self.export_folder_cursor = insert_at_char_cursor(
+                    &mut self.export_folder_input,
+                    self.export_folder_cursor,
+                    c,
+                );
+            }
+            KeyCode::Backspace => {
+                self.export_folder_cursor = remove_before_char_cursor(
+                    &mut self.export_folder_input,
+                    self.export_folder_cursor,
+                );
+            }
+            KeyCode::Left => {
+                if self.export_folder_cursor > 0 {
+                    self.export_folder_cursor -= 1;
+                }
+            }
+            KeyCode::Right => {
+                if self.export_folder_cursor < char_len(&self.export_folder_input) {
+                    self.export_folder_cursor += 1;
+                }
+            }
+            KeyCode::Esc => {
+                self.screen = Screen::TrialActions;
+                self.menu_state.select(Some(0));
+            }
             _ => {}
         }
     }
@@ -1773,25 +1989,62 @@ impl App {
                     let label = self.current_menu[idx].label.clone();
                     match label.as_str() {
                         "Save Model Locally" => {
-                            self.screen = Screen::Export;
-                            self.current_menu = vec![
-                                MenuItem::new(
-                                    "Merge and export full model",
-                                    "Requires sufficient RAM",
-                                ),
-                                MenuItem::new(
-                                    "Export adapter only",
-                                    "Can be merged later, smaller file",
-                                ),
-                                MenuItem::new("Convert to GGUF", "Export as a quantized GGUF file"),
-                                MenuItem::new("Back", "Return to actions menu").with_key("Esc"),
-                            ];
-                            self.menu_state.select(Some(0));
+                            let sanitized = crate::subprocess::checkpoint_name(&self.model_input);
+                            let trial_id = self.selected_trial_id.unwrap_or_else(|| {
+                                self.trials
+                                    .iter()
+                                    .min_by_key(|t| (t.refusals, (t.kl_divergence * 10000.0) as u64))
+                                    .map(|t| t.index)
+                                    .unwrap_or(0)
+                            });
+
+                            let default_folder = crate::subprocess::repo_root()
+                                .join("exports")
+                                .join(format!("{sanitized}-merged-trial{trial_id}"));
+
+                            self.export_folder_input = default_folder.to_string_lossy().to_string();
+                            self.export_folder_cursor = char_len(&self.export_folder_input);
+                            self.screen = Screen::ExportFolderInput;
                         }
                         "Upload to Hugging Face" => {
-                            self.screen = Screen::TokenInput;
-                            self.status_message =
-                                "Enter your Hugging Face token to upload the model.".to_string();
+                            let trial_id = self.selected_trial_id.unwrap_or_else(|| {
+                                self.trials
+                                    .iter()
+                                    .min_by_key(|t| (t.refusals, (t.kl_divergence * 10000.0) as u64))
+                                    .map(|t| t.index)
+                                    .unwrap_or(0)
+                            });
+
+                            let repo_id = if self.model_input.contains('/') {
+                                let parts: Vec<&str> = self.model_input.split('/').collect();
+                                format!("Grimxlock/{}-Annihilated", parts.last().unwrap_or(&"model"))
+                            } else {
+                                format!("Grimxlock/{}-Annihilated", self.model_input)
+                            };
+
+                            self.is_processing = true;
+                            self.log_lines.clear();
+                            self.log_lines.push((
+                                format!(
+                                    "Uploading Trial {} to Hugging Face ({}) ...",
+                                    trial_id, repo_id
+                                ),
+                                LogLevel::Info,
+                            ));
+                            self.screen = Screen::Processing;
+
+                            let token = if self.hf_token_input.is_empty() {
+                                None
+                            } else {
+                                Some(self.hf_token_input.as_str())
+                            };
+
+                            self.subprocess = Some(SubprocessManager::spawn_hf_upload(
+                                &self.model_input,
+                                trial_id,
+                                &repo_id,
+                                token,
+                            ));
                         }
                         "Chat with Model" => {
                             self.screen = Screen::Chat;
@@ -2394,6 +2647,13 @@ impl App {
                 self.render_checkpoint_prompt_dialog(frame, area);
             }
             Screen::CompletedModels => self.render_gguf_splash(frame, area),
+            Screen::TrialSelection => self.render_menu_screen(
+                frame,
+                area,
+                "SELECT TRIAL / KL DIVERGENCE",
+                "Choose trial by refusal rate & KL divergence:",
+            ),
+            Screen::ExportFolderInput => self.render_export_folder_input(frame, area),
             Screen::RecentModels => self.render_menu_screen(
                 frame,
                 area,
@@ -2711,6 +2971,75 @@ impl App {
             .alignment(Alignment::Center);
             frame.render_widget(hints, hint_area);
         }
+    }
+
+    // ─── Export Folder Input Screen ────────────────────────────
+
+    fn render_export_folder_input(&self, frame: &mut Frame, area: Rect) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(3),
+                Constraint::Length(5),
+                Constraint::Min(0),
+                Constraint::Length(1),
+            ])
+            .split(area);
+
+        let title = Paragraph::new(Line::from(vec![
+            Span::styled("  ⚔ ", Style::default().fg(theme::NEON_CYAN)),
+            Span::styled("EXPORT FOLDER SELECTION", theme::title_style()),
+            Span::styled(" ⚔  ", Style::default().fg(theme::NEON_CYAN)),
+        ]))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
+        );
+        frame.render_widget(title, chunks[0]);
+
+        let sub = Paragraph::new(Line::from(Span::styled(
+            "Enter destination directory for the merged model files:",
+            theme::dim_style(),
+        )))
+        .alignment(Alignment::Center);
+        frame.render_widget(sub, chunks[1]);
+
+        let input_width = 70.min(area.width.saturating_sub(4));
+        let input_area = centered_rect_fixed(input_width, 3, chunks[2]);
+
+        let input = Paragraph::new(Line::from(Span::styled(
+            &self.export_folder_input,
+            Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD),
+        )))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(theme::BORDER_ACTIVE))
+                .title(Span::styled(
+                    " Destination Folder Path ",
+                    Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD),
+                )),
+        );
+        frame.render_widget(input, input_area);
+
+        let cursor_x = input_area.x + 1 + self.export_folder_cursor as u16;
+        let cursor_y = input_area.y + 1;
+        if cursor_x < input_area.x + input_area.width - 1 {
+            frame.set_cursor_position((cursor_x, cursor_y));
+        }
+
+        let hint = Paragraph::new(Line::from(vec![
+            Span::styled(" Enter ", theme::key_hint_style()),
+            Span::styled("Confirm & Export  ", theme::key_desc_style()),
+            Span::styled(" Esc ", theme::key_hint_style()),
+            Span::styled("Cancel", theme::key_desc_style()),
+        ]))
+        .alignment(Alignment::Center);
+        frame.render_widget(hint, chunks[4]);
     }
 
     fn render_settings_panel(&self, frame: &mut Frame, area: Rect, centered: bool) {
