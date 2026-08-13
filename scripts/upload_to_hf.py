@@ -3,11 +3,12 @@ Upload annihilated model (Safetensors, Configs, Tokenizer, and GGUF) to HuggingF
 Usage:
   python scripts/upload_to_hf.py [--trial TRIAL_ID] [--repo REPO_ID]
 """
+
 import argparse
-import os
 import shutil
 import sys
 from pathlib import Path
+
 import torch
 import torch.nn.functional as F
 from huggingface_hub import HfApi
@@ -16,34 +17,39 @@ from huggingface_hub import HfApi
 from annihilate.export import read_trial_attributes, settings_from_checkpoint
 from annihilate.model import AbliterationParameters, Model
 from annihilate.system import empty_cache
-from annihilate.utils import load_prompts, checkpoint_name_for_model
+from annihilate.utils import checkpoint_name_for_model, load_prompts
 
 DEFAULT_REPO_ID = "Grimxlock/openbmb-MiniCPM5-1B-F16-Annihilated"
 MODEL_NAME = "openbmb/MiniCPM5-1B"
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 
+
 def main():
     parser = argparse.ArgumentParser(description="Upload annihilated model to HF")
-    parser.add_argument("--trial", type=int, default=179, help="Trial ID to export (e.g. 179, 196)")
-    parser.add_argument("--repo", type=str, default=DEFAULT_REPO_ID, help="HuggingFace Repo ID")
+    parser.add_argument(
+        "--trial", type=int, default=179, help="Trial ID to export (e.g. 179, 196)"
+    )
+    parser.add_argument(
+        "--repo", type=str, default=DEFAULT_REPO_ID, help="HuggingFace Repo ID"
+    )
     args = parser.parse_args()
 
     repo_id = args.repo
     target_trial_id = args.trial
 
     print(f"=== ANNIHILATION-LLM: Upload to HuggingFace ({repo_id}) ===")
-    
+
     api = HfApi()
     user_info = api.whoami()
     print(f"Authenticated as: {user_info['name']}")
-    
+
     sanitized = checkpoint_name_for_model(MODEL_NAME)
     checkpoint_path = ROOT_DIR / "checkpoints" / f"{sanitized}.jsonl"
-    
+
     if not checkpoint_path.exists():
         print(f"Error: Checkpoint file {checkpoint_path} not found.")
         sys.exit(1)
-        
+
     print(f"Reading checkpoint: {checkpoint_path}")
     settings = settings_from_checkpoint(str(checkpoint_path), MODEL_NAME)
 
@@ -54,7 +60,7 @@ def main():
         settings.seed = 42
 
     trials = read_trial_attributes(str(checkpoint_path))
-    
+
     if target_trial_id in trials:
         best_trial_id = target_trial_id
         attrs = trials[target_trial_id]
@@ -81,8 +87,10 @@ def main():
                 best_direction_index = attrs.get("direction_index")
                 best_trial_id = trial_id
 
-    print(f"Selected Trial {best_trial_id} (Refusals: {best_refusals}, KL Div: {best_kl:.4f}). Loading base model...")
-    
+    print(
+        f"Selected Trial {best_trial_id} (Refusals: {best_refusals}, KL Div: {best_kl:.4f}). Loading base model..."
+    )
+
     model = Model(settings)
 
     print("Calculating refusal directions...")
@@ -128,11 +136,13 @@ def main():
     # 2. Find and copy GGUF file
     exports_dir = ROOT_DIR / "exports"
     gguf_candidates = list(exports_dir.glob("*.gguf")) if exports_dir.exists() else []
-    
+
     if gguf_candidates:
         for gguf_file in gguf_candidates:
             target_gguf = export_dir / gguf_file.name
-            print(f"Copying GGUF file {gguf_file.name} ({gguf_file.stat().st_size / (1024**3):.2f} GiB) -> {target_gguf}...")
+            print(
+                f"Copying GGUF file {gguf_file.name} ({gguf_file.stat().st_size / (1024**3):.2f} GiB) -> {target_gguf}..."
+            )
             shutil.copy2(gguf_file, target_gguf)
     else:
         print(f"Warning: No GGUF files found in {exports_dir}.")
@@ -174,10 +184,13 @@ This repository contains the **annihilated / abliterated** version of [{MODEL_NA
         repo_type="model",
     )
 
-    print(f"[SUCCESS] Upload complete! Check your model at: https://huggingface.co/{repo_id}")
-    
+    print(
+        f"[SUCCESS] Upload complete! Check your model at: https://huggingface.co/{repo_id}"
+    )
+
     # Cleanup temp directory
     shutil.rmtree(export_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     main()

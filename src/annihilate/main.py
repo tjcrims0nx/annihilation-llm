@@ -468,7 +468,11 @@ def run():
     print()
     print_memory_usage()
 
-    if settings.kernel_type.value == "gaussian" or settings.use_cosmic_layer_selection or settings.use_ega:
+    if (
+        settings.kernel_type.value == "gaussian"
+        or settings.use_cosmic_layer_selection
+        or settings.use_ega
+    ):
         print(
             f"* [bold cyan]OBLITERATUS Mode Active[/] (Kernel: {settings.kernel_type.value}, COSMIC Selection: {settings.use_cosmic_layer_selection}, EGA: {settings.use_ega})"
         )
