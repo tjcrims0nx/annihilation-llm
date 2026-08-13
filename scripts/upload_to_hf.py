@@ -9,6 +9,9 @@ import shutil
 import sys
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 import torch
 import torch.nn.functional as F
 from huggingface_hub import HfApi

@@ -12,6 +12,10 @@ import zipfile
 from pathlib import Path
 
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+
 def print_event(level: str, msg: str):
     print(json.dumps({"level": level, "message": msg}), flush=True)
 
