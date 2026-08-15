@@ -163,7 +163,7 @@ uv pip install --python annihilation-env annihilate-llm
 .\start.bat
 ```
 
-The TUI locates the interpreter by checking `.venv`, `annihilation-env`, `venv`, and `env` at the repository root, in that order — any of those names works.
+The TUI locates the interpreter by checking `annihilation-env`, `.venv`, `venv`, and `env` at the repository root, in that order — any of those names works. The order matters when more than one exists, which is common: `uv` creates `.venv` by default, so a repository with both directories uses `annihilation-env`.
 
 > 💡 **Note:** `start.bat` compiles the Rust TUI, so the very first launch takes a minute. Subsequent launches are near-instant. It does **not** create the Python environment — do that once, as above.
 
