@@ -5,11 +5,14 @@ Usage:
 """
 
 import argparse
+import io
 import shutil
 import sys
 from pathlib import Path
 
-if hasattr(sys.stdout, "reconfigure"):
+# See the note in scripts/gguf_converter.py: hasattr does not narrow sys.stdout
+# for the type checker, isinstance does.
+if isinstance(sys.stdout, io.TextIOWrapper):
     sys.stdout.reconfigure(encoding="utf-8")
 
 import torch

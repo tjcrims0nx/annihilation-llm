@@ -8,11 +8,14 @@ merged model to disk.
 """
 
 import argparse
+import io
 import json
 import sys
 from pathlib import Path
 
-if hasattr(sys.stdout, "reconfigure"):
+# See the note in scripts/gguf_converter.py: hasattr does not narrow sys.stdout
+# for the type checker, isinstance does.
+if isinstance(sys.stdout, io.TextIOWrapper):
     sys.stdout.reconfigure(encoding="utf-8")
 
 
@@ -223,11 +226,15 @@ def export_model(checkpoint_path: str, trial_id: int, output_dir: str):
             output_path, max_shard_size=settings.max_shard_size or "10GB"
         )
         model.tokenizer.save_pretrained(output_path)
-        if getattr(model, "processor", None) is not None:
-            model.processor.save_pretrained(output_path)
-        if getattr(merged, "generation_config", None) is not None:
+        # Bound to a local because a `getattr(...) is not None` test does not
+        # narrow the attribute itself for the type checker, only the expression.
+        processor = getattr(model, "processor", None)
+        if processor is not None:
+            processor.save_pretrained(output_path)
+        generation_config = getattr(merged, "generation_config", None)
+        if generation_config is not None:
             try:
-                merged.generation_config.save_pretrained(output_path)
+                generation_config.save_pretrained(output_path)
             except Exception:
                 pass
 

@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -11,7 +12,11 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-if hasattr(sys.stdout, "reconfigure"):
+# isinstance rather than hasattr: a type checker cannot narrow sys.stdout (typed
+# TextIO) from a hasattr guard, so `reconfigure` resolves to object and the call
+# fails `ty check`. The guard is still needed — stdout is not always a real
+# TextIOWrapper, e.g. under pytest capture.
+if isinstance(sys.stdout, io.TextIOWrapper):
     sys.stdout.reconfigure(encoding="utf-8")
 
 
