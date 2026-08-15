@@ -1,6 +1,6 @@
 [project]
 name = "annihilate-llm"
-version = "1.4.7"
+version = "1.4.8"
 description = "Fully automatic censorship removal for language models"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -55,6 +55,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# An extra rather than a required dependency: nothing under src/annihilate
+# imports gguf. The package only ever inspects names and tags for the substring
+# (model.py:168, reproduce.py:57), so forcing the wheel on every install would
+# be declaring a dependency the library never loads.
+#
+# Declaring it at all is what keeps `uv sync` from deleting it. gguf was
+# previously undeclared and installed on demand by scripts/gguf_converter.py,
+# which meant any sync pruned it as an unlocked package and the next GGUF export
+# had to fetch it again.
+#
+# Floor, not a pin: the converter script is downloaded from the *latest*
+# llama.cpp release at conversion time, and it imports gguf, so the two want to
+# move together. Dependabot's weekly pip run keeps the lock current.
+gguf = [
+    "gguf>=0.19",
+]
 research = [
     "geom-median~=0.1",
     "imageio~=2.37",

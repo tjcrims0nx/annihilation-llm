@@ -194,9 +194,14 @@ def ensure_llama_cpp(bin_dir: Path):
                 )
                 sys.exit(1)
 
-    # Ensure gguf package is installed. `gguf` is a llama.cpp-side dependency
-    # that is not declared in pyproject.toml, so probe for it by spec rather
-    # than importing it (an import statement would not resolve for type checking).
+    # Ensure gguf package is installed. It is an optional extra rather than a
+    # required dependency (nothing under src/annihilate imports it), so a plain
+    # `uv sync` or `pip install annihilate-llm` leaves it out and this fallback
+    # is what makes conversion work anyway. Install the extra to skip it:
+    # `pip install annihilate-llm[gguf]`, or `uv sync --extra gguf`.
+    #
+    # Probe by spec rather than importing, since an import statement here would
+    # not resolve for type checking.
     if importlib.util.find_spec("gguf") is None:
         print_event("info", "Installing gguf python package...")
         _install_package("gguf")
