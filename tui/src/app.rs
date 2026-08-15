@@ -765,10 +765,11 @@ impl App {
                         }
                         ParsedEvent::BestTrial { .. } => {}
                         ParsedEvent::OptimizationComplete => {
-                            self.log_lines
-                                .push(("Optimization finished!".into(), LogLevel::Success));
+                            self.log_lines.push((
+                                "Optimization finished! Press Esc to return to the main menu, then select 'Completed Models' to access trial results.".into(),
+                                LogLevel::Success,
+                            ));
                             self.is_processing = false;
-                            self.switch_to_results();
                         }
                         ParsedEvent::GpuMemory { .. } => {}
                         ParsedEvent::ElapsedTime(time) => {
