@@ -189,16 +189,20 @@ fn load_checkpoint_trials(path: &std::path::Path) -> Vec<TrialResult> {
             continue;
         };
 
-        if val.get("op_code").and_then(|c| c.as_u64()) == Some(8) {
-            if let (Some(trial_id), Some(user_attr)) = (
-                val.get("trial_id").and_then(|t| t.as_u64()).map(|t| t as usize),
+        if val.get("op_code").and_then(|c| c.as_u64()) == Some(8)
+            && let (Some(trial_id), Some(user_attr)) = (
+                val.get("trial_id")
+                    .and_then(|t| t.as_u64())
+                    .map(|t| t as usize),
                 val.get("user_attr").and_then(|u| u.as_object()),
-            ) {
-                let entry = raw_trials.entry(trial_id).or_insert_with(|| serde_json::json!({}));
-                if let Some(map) = entry.as_object_mut() {
-                    for (k, v) in user_attr {
-                        map.insert(k.clone(), v.clone());
-                    }
+            )
+        {
+            let entry = raw_trials
+                .entry(trial_id)
+                .or_insert_with(|| serde_json::json!({}));
+            if let Some(map) = entry.as_object_mut() {
+                for (k, v) in user_attr {
+                    map.insert(k.clone(), v.clone());
                 }
             }
         }
@@ -227,9 +231,11 @@ fn load_checkpoint_trials(path: &std::path::Path) -> Vec<TrialResult> {
     }
 
     results.sort_by(|a, b| {
-        a.refusals
-            .cmp(&b.refusals)
-            .then_with(|| a.kl_divergence.partial_cmp(&b.kl_divergence).unwrap_or(std::cmp::Ordering::Equal))
+        a.refusals.cmp(&b.refusals).then_with(|| {
+            a.kl_divergence
+                .partial_cmp(&b.kl_divergence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     });
 
     results
@@ -1129,7 +1135,6 @@ impl App {
         }
     }
 
-
     fn switch_to_results(&mut self) {
         if !self.model_input.is_empty() {
             let sanitized = crate::subprocess::checkpoint_name(&self.model_input);
@@ -1311,6 +1316,12 @@ impl App {
                 }
             }
             KeyCode::Char('q') | KeyCode::Char('Q') => self.should_quit = true,
+            // Shortcut badges, last so every literal arm above keeps priority
+            // (notably j/k navigation). Routed back through Enter rather than
+            // repeating the action, so the two paths cannot diverge.
+            KeyCode::Char(c) if self.select_menu_shortcut(c) => {
+                self.handle_splash_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            }
             _ => {}
         }
     }
@@ -1343,12 +1354,10 @@ impl App {
                         self.current_menu = vec![
                             MenuItem::new("Save Model Locally", "Export merged model to a folder")
                                 .with_key("S"),
-                            MenuItem::new("Chat with Model", "Test the decensored model").with_key("C"),
-                            MenuItem::new(
-                                "Run Benchmarks",
-                                "Evaluate with HellaSwag and ARC-Easy",
-                            )
-                            .with_key("B"),
+                            MenuItem::new("Chat with Model", "Test the decensored model")
+                                .with_key("C"),
+                            MenuItem::new("Run Benchmarks", "Evaluate with HellaSwag and ARC-Easy")
+                                .with_key("B"),
                             MenuItem::new("Convert to GGUF", "Export as a quantized GGUF file")
                                 .with_key("G"),
                             MenuItem::new("Upload to Hugging Face", "Push model to HF Hub")
@@ -1363,6 +1372,12 @@ impl App {
                 }
             }
             KeyCode::Esc => self.go_back_to_splash(),
+            // Shortcut badges, last so every literal arm above keeps priority
+            // (notably j/k navigation). Routed back through Enter rather than
+            // repeating the action, so the two paths cannot diverge.
+            KeyCode::Char(c) if self.select_menu_shortcut(c) => {
+                self.handle_completed_models_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            }
             _ => {}
         }
     }
@@ -1388,11 +1403,8 @@ impl App {
                         MenuItem::new("Save Model Locally", "Export merged model to a folder")
                             .with_key("S"),
                         MenuItem::new("Chat with Model", "Test the decensored model").with_key("C"),
-                        MenuItem::new(
-                            "Run Benchmarks",
-                            "Evaluate with HellaSwag and ARC-Easy",
-                        )
-                        .with_key("B"),
+                        MenuItem::new("Run Benchmarks", "Evaluate with HellaSwag and ARC-Easy")
+                            .with_key("B"),
                         MenuItem::new("Convert to GGUF", "Export as a quantized GGUF file")
                             .with_key("G"),
                         MenuItem::new("Upload to Hugging Face", "Push model to HF Hub")
@@ -1409,6 +1421,12 @@ impl App {
             KeyCode::Esc => {
                 self.screen = Screen::CompletedModels;
                 self.menu_state.select(Some(0));
+            }
+            // Shortcut badges, last so every literal arm above keeps priority
+            // (notably j/k navigation). Routed back through Enter rather than
+            // repeating the action, so the two paths cannot diverge.
+            KeyCode::Char(c) if self.select_menu_shortcut(c) => {
+                self.handle_trial_selection_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
             }
             _ => {}
         }
@@ -1437,7 +1455,10 @@ impl App {
                     self.is_processing = true;
                     self.log_lines.clear();
                     self.log_lines.push((
-                        format!("Exporting merged model (Trial {}) to {}...", trial_id, target_dir),
+                        format!(
+                            "Exporting merged model (Trial {}) to {}...",
+                            trial_id, target_dir
+                        ),
                         LogLevel::Info,
                     ));
                     self.screen = Screen::Processing;
@@ -1521,6 +1542,12 @@ impl App {
                 }
             }
             KeyCode::Esc => self.go_back_to_splash(),
+            // Shortcut badges, last so every literal arm above keeps priority
+            // (notably j/k navigation). Routed back through Enter rather than
+            // repeating the action, so the two paths cannot diverge.
+            KeyCode::Char(c) if self.select_menu_shortcut(c) => {
+                self.handle_setup_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            }
             _ => {}
         }
     }
@@ -1713,6 +1740,12 @@ impl App {
                 };
             }
             KeyCode::Esc => self.go_back_to_splash(),
+            // Shortcut badges, last so every literal arm above keeps priority
+            // (notably j/k navigation). Routed back through Enter rather than
+            // repeating the action, so the two paths cannot diverge.
+            KeyCode::Char(c) if self.select_menu_shortcut(c) => {
+                self.handle_config_select_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            }
             _ => {}
         }
     }
@@ -1934,11 +1967,8 @@ impl App {
                         MenuItem::new("Save Model Locally", "Export merged model to a folder")
                             .with_key("S"),
                         MenuItem::new("Chat with Model", "Test the decensored model").with_key("C"),
-                        MenuItem::new(
-                            "Run Benchmarks",
-                            "Evaluate with HellaSwag and ARC-Easy",
-                        )
-                        .with_key("B"),
+                        MenuItem::new("Run Benchmarks", "Evaluate with HellaSwag and ARC-Easy")
+                            .with_key("B"),
                         MenuItem::new("Convert to GGUF", "Export as a quantized GGUF file")
                             .with_key("G"),
                         MenuItem::new("Upload to Hugging Face", "Push model to HF Hub")
@@ -2003,7 +2033,10 @@ impl App {
 
                             let repo_id = if self.model_input.contains('/') {
                                 let parts: Vec<&str> = self.model_input.split('/').collect();
-                                format!("Grimxlock/{}-Annihilated", parts.last().unwrap_or(&"model"))
+                                format!(
+                                    "Grimxlock/{}-Annihilated",
+                                    parts.last().unwrap_or(&"model")
+                                )
                             } else {
                                 format!("Grimxlock/{}-Annihilated", self.model_input)
                             };
@@ -2039,7 +2072,8 @@ impl App {
                             self.chat_input.clear();
                             self.chat_loading = true;
                             self.chat_streaming = false;
-                            self.status_message = format!("Starting chat server (Trial {})...", trial_id);
+                            self.status_message =
+                                format!("Starting chat server (Trial {})...", trial_id);
                             self.chat_messages.push((
                                 "system".to_string(),
                                 format!(
@@ -2047,8 +2081,10 @@ impl App {
                                     trial_id
                                 ),
                             ));
-                            self.chat_subprocess =
-                                Some(SubprocessManager::spawn_chat_server(&self.model_input, Some(trial_id)));
+                            self.chat_subprocess = Some(SubprocessManager::spawn_chat_server(
+                                &self.model_input,
+                                Some(trial_id),
+                            ));
                         }
                         "Run Benchmarks" => {
                             let trial_id = self.get_effective_trial_id();
@@ -2060,10 +2096,14 @@ impl App {
                                 format!("Starting benchmarks on trial {}...", trial_id),
                                 LogLevel::Info,
                             ));
-                            self.benchmark_subprocess =
-                                Some(SubprocessManager::spawn_benchmark(&self.model_input, Some(trial_id)));
-                            self.status_message =
-                                format!("Running benchmarks (Trial {})... This may take a while.", trial_id);
+                            self.benchmark_subprocess = Some(SubprocessManager::spawn_benchmark(
+                                &self.model_input,
+                                Some(trial_id),
+                            ));
+                            self.status_message = format!(
+                                "Running benchmarks (Trial {})... This may take a while.",
+                                trial_id
+                            );
                         }
                         "Run More Trials" => { /* More trials */ }
                         "Convert to GGUF" => {
@@ -2113,6 +2153,12 @@ impl App {
                 } else {
                     self.go_back_to_splash();
                 }
+            }
+            // Shortcut badges, last so every literal arm above keeps priority
+            // (notably j/k navigation). Routed back through Enter rather than
+            // repeating the action, so the two paths cannot diverge.
+            KeyCode::Char(c) if self.select_menu_shortcut(c) => {
+                self.handle_trial_actions_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
             }
             _ => {}
         }
@@ -2291,6 +2337,12 @@ impl App {
                 self.screen = Screen::TrialActions;
                 self.menu_state.select(Some(0));
             }
+            // Shortcut badges, last so every literal arm above keeps priority
+            // (notably j/k navigation). Routed back through Enter rather than
+            // repeating the action, so the two paths cannot diverge.
+            KeyCode::Char(c) if self.select_menu_shortcut(c) => {
+                self.handle_export_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            }
             _ => {}
         }
     }
@@ -2337,6 +2389,12 @@ impl App {
             }
             KeyCode::Esc => {
                 self.go_back_to_splash();
+            }
+            // Shortcut badges, last so every literal arm above keeps priority
+            // (notably j/k navigation). Routed back through Enter rather than
+            // repeating the action, so the two paths cannot diverge.
+            KeyCode::Char(c) if self.select_menu_shortcut(c) => {
+                self.handle_gguf_size_select_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
             }
             _ => {}
         }
@@ -2443,6 +2501,12 @@ impl App {
                 ];
                 self.menu_state.select(Some(1));
             }
+            // Shortcut badges, last so every literal arm above keeps priority
+            // (notably j/k navigation). Routed back through Enter rather than
+            // repeating the action, so the two paths cannot diverge.
+            KeyCode::Char(c) if self.select_menu_shortcut(c) => {
+                self.handle_recent_models_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            }
             _ => {}
         }
     }
@@ -2461,6 +2525,42 @@ impl App {
         if i < self.current_menu.len().saturating_sub(1) {
             self.menu_state.select(Some(i + 1));
         }
+    }
+
+    /// Selects the menu item whose `[X]` badge is `c`, reporting whether one matched.
+    ///
+    /// Menu items carry a `key_hint` that the renderer draws as a badge, and the
+    /// README tells people to press those letters — but nothing ever read the
+    /// hint back, so every badge was decorative and only the arrow keys worked.
+    /// Callers pair this with a synthetic Enter so a shortcut runs the exact same
+    /// arm as selecting the item by hand; there is no second copy of the action
+    /// to drift out of step.
+    ///
+    /// Multi-character hints ("Enter", "Esc") are skipped: those keys already
+    /// have their own arms, and matching them here would shadow the real
+    /// binding. Callers place the shortcut arm after their literal `Char` arms
+    /// for the same reason, so navigation keys like `j`/`k` keep winning.
+    ///
+    /// Callers use this as a match guard, so it deliberately mutates nothing
+    /// unless it returns true — a key with no badge falls through to the arms
+    /// below exactly as if the guard had never run.
+    fn select_menu_shortcut(&mut self, c: char) -> bool {
+        let matched = self.current_menu.iter().position(|item| {
+            item.key_hint.as_deref().is_some_and(|hint| {
+                let mut hint = hint.chars();
+                match (hint.next(), hint.next()) {
+                    (Some(only), None) => only.eq_ignore_ascii_case(&c),
+                    _ => false,
+                }
+            })
+        });
+
+        if let Some(index) = matched {
+            self.menu_state.select(Some(index));
+            return true;
+        }
+
+        false
     }
 
     fn go_back_to_splash(&mut self) {
@@ -2576,6 +2676,15 @@ impl App {
                 }
             }
             KeyCode::Esc => self.go_back_to_splash(),
+            // Shortcut badges, last so every literal arm above keeps priority
+            // (notably j/k navigation). Routed back through Enter rather than
+            // repeating the action, so the two paths cannot diverge.
+            KeyCode::Char(c) if self.select_menu_shortcut(c) => {
+                self.handle_checkpoint_prompt_key(KeyEvent::new(
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                ));
+            }
             _ => {}
         }
     }
@@ -2999,7 +3108,9 @@ impl App {
 
         let input = Paragraph::new(Line::from(Span::styled(
             &self.export_folder_input,
-            Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::NEON_CYAN)
+                .add_modifier(Modifier::BOLD),
         )))
         .block(
             Block::default()
@@ -3008,7 +3119,9 @@ impl App {
                 .border_style(Style::default().fg(theme::BORDER_ACTIVE))
                 .title(Span::styled(
                     " Destination Folder Path ",
-                    Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme::NEON_CYAN)
+                        .add_modifier(Modifier::BOLD),
                 )),
         );
         frame.render_widget(input, input_area);
@@ -4702,5 +4815,76 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A badge the renderer paints has to be a key that actually does something.
+    ///
+    /// `with_key` used to feed nothing but the `[X]` drawn next to a menu label;
+    /// no handler ever read the hint back. So the whole advertised keyboard —
+    /// including the `M`, `B` and `G` the README tells people to press — was
+    /// decorative, and the arrow keys were the only way through the app.
+    #[test]
+    fn advertised_menu_shortcuts_are_live() {
+        fn press(app: &mut App, c: char) {
+            app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+
+        // Splash. Both cases, since the badge is drawn upper-case but nobody
+        // holds shift to use it.
+        for c in ['c', 'C'] {
+            let mut app = App::new();
+            press(&mut app, c);
+            assert_eq!(app.screen, Screen::ConfigSelect, "splash {c:?}");
+        }
+
+        let mut app = App::new();
+        press(&mut app, 'a');
+        assert_eq!(app.screen, Screen::About, "splash 'a'");
+
+        // Trial actions, reached the way a user reaches it so the menu under
+        // test is the one production builds, not a copy of it.
+        let trial_actions = || {
+            let mut app = App::new();
+            app.trials.push(TrialResult {
+                index: 7,
+                refusals: 0,
+                total_prompts: 10,
+                kl_divergence: 0.1,
+                direction: "test".to_string(),
+            });
+            app.switch_to_results();
+            app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            assert_eq!(app.screen, Screen::TrialActions, "setup");
+            app
+        };
+
+        let mut app = trial_actions();
+        press(&mut app, 'g');
+        assert_eq!(app.screen, Screen::GgufSizeSelect, "trial actions 'g'");
+
+        let mut app = trial_actions();
+        press(&mut app, 'd');
+        assert!(
+            matches!(
+                app.screen,
+                Screen::Confirm(ConfirmAction::DeleteCheckpoint(_))
+            ),
+            "trial actions 'd' left screen at {:?}",
+            app.screen
+        );
+
+        // Navigation keys have their own bindings and must keep winning: 'j'
+        // moves the cursor, it does not fire the item badged [J] — there isn't
+        // one, but a future menu could add it.
+        let mut app = trial_actions();
+        press(&mut app, 'j');
+        assert_eq!(app.screen, Screen::TrialActions, "'j' should only navigate");
+        assert_eq!(app.menu_state.selected(), Some(1), "'j' should move down");
+
+        // An unbound letter must stay inert rather than firing whatever is
+        // currently selected.
+        let mut app = trial_actions();
+        press(&mut app, 'z');
+        assert_eq!(app.screen, Screen::TrialActions, "'z' is not a shortcut");
     }
 }
