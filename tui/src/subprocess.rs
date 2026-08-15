@@ -528,10 +528,10 @@ impl SubprocessManager {
         cmd.env("PYTHONUNBUFFERED", "1");
         cmd.env("PYTHONWARNINGS", "ignore");
 
-        if let Some(token) = hf_token {
-            if !token.is_empty() {
-                cmd.env("HF_TOKEN", token);
-            }
+        if let Some(token) = hf_token
+            && !token.is_empty()
+        {
+            cmd.env("HF_TOKEN", token);
         }
 
         match cmd.spawn() {
