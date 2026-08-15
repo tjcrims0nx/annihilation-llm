@@ -13,8 +13,8 @@ def in_virtual_env() -> bool:
     return sys.prefix != sys.base_prefix
 
 
-def uv_target_args() -> list[str]:
-    """Arguments pointing uv at the interpreter running this script.
+def uv_sync_target_args() -> list[str]:
+    """Arguments pointing `uv sync` at the interpreter running this script.
 
     uv resolves the project environment to `.venv` no matter which interpreter
     invoked it, but the TUI prefers `annihilation-env` when it exists (see
@@ -27,6 +27,18 @@ def uv_target_args() -> list[str]:
     its own default.
     """
     return ["--active"] if in_virtual_env() else []
+
+
+def uv_pip_target_args() -> list[str]:
+    """The same targeting for `uv pip install`, which has no `--active`.
+
+    `--active` is a `uv sync` flag; passing it to `uv pip install` fails outright
+    with "unexpected argument". `--python` is the equivalent there and is more
+    explicit besides — it names the interpreter rather than relying on
+    VIRTUAL_ENV being read the way we expect (same approach as
+    `scripts/gguf_converter.py`).
+    """
+    return ["--python", sys.executable]
 
 
 def uv_env() -> dict[str, str]:
@@ -124,7 +136,7 @@ def main():
                 "sync",
                 "--no-progress",
                 "--link-mode=copy",
-                *uv_target_args(),
+                *uv_sync_target_args(),
             ]
             print(f"Running: {' '.join(cmd)}", flush=True)
             subprocess.run(cmd, check=True, env=uv_env())
@@ -192,7 +204,7 @@ def main():
                         "https://download.pytorch.org/whl/cu126",
                         "--reinstall",
                         "--no-progress",
-                        *uv_target_args(),
+                        *uv_pip_target_args(),
                     ]
                 else:
                     cmd = [
