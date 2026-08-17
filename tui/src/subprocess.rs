@@ -27,17 +27,37 @@ pub fn repo_root() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
+/// Python's executable path inside a venv layout: `Scripts\python.exe` on
+/// Windows, `bin/python` everywhere else. The layout is what differs between
+/// platforms, not the venv names, so one helper keeps every probe and every
+/// fallback consistent.
+#[cfg(windows)]
+fn venv_python_rel(venv: &str) -> PathBuf {
+    PathBuf::from(venv).join("Scripts").join("python.exe")
+}
+
+/// Python's executable path inside a venv layout: `Scripts\python.exe` on
+/// Windows, `bin/python` everywhere else. The layout is what differs between
+/// platforms, not the venv names, so one helper keeps every probe and every
+/// fallback consistent.
+#[cfg(not(windows))]
+fn venv_python_rel(venv: &str) -> PathBuf {
+    PathBuf::from(venv).join("bin").join("python")
+}
+
+/// The venv names the TUI recognises, in priority order. Both directories may
+/// exist (uv creates `.venv` by default), so the order matters.
+const VENV_NAMES: [&str; 4] = ["annihilation-env", ".venv", "venv", "env"];
+
 /// Get the path to the Python executable in the project venv.
 fn python_exe() -> PathBuf {
     let root = repo_root();
 
     // Check multiple common venv names — annihilation-env first, matching the
-    // priority in spawn_setup()'s PowerShell block.  Both directories may exist
-    // (uv creates .venv by default), so the order matters.
-    let venv_names = ["annihilation-env", ".venv", "venv", "env"];
-
-    for venv in venv_names.iter() {
-        let path = root.join(venv).join("Scripts").join("python.exe");
+    // priority in spawn_setup(). Both directories may exist (uv creates .venv
+    // by default), so the order matters.
+    for venv in VENV_NAMES.iter() {
+        let path = root.join(venv_python_rel(venv));
 
         if path.exists() {
             return path;
@@ -45,7 +65,36 @@ fn python_exe() -> PathBuf {
     }
 
     // Fallback if none exist (will likely crash on spawn, but we try the standard)
-    root.join(".venv").join("Scripts").join("python.exe")
+    root.join(venv_python_rel(".venv"))
+}
+
+/// The Python command every spawned process resolves through PATH. On Windows
+/// the py launcher and python.org installers both provide `python`; on Linux
+/// and macOS the distribution package is usually `python3`, with plain
+/// `python` present on some setups. Returning `None` means "no python found
+/// on PATH" rather than a different command.
+fn python_command() -> Option<&'static str> {
+    if which("python") {
+        return Some("python");
+    }
+
+    #[cfg(not(windows))]
+    if which("python3") {
+        return Some("python3");
+    }
+
+    None
+}
+
+/// Whether a command is available through PATH resolution.
+fn which(cmd: &str) -> bool {
+    Command::new(cmd)
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 /// Turn a model reference into the checkpoint filename stem used by the Python side.
@@ -131,11 +180,77 @@ impl SubprocessManager {
         let (tx, rx) = mpsc::channel::<SubprocessMessage>();
 
         let root = repo_root();
-
-        let mut cmd = Command::new("powershell");
         let gpu_arg = if is_gpu { "--gpu" } else { "" };
-        cmd.arg("-Command");
-        cmd.arg(format!("if (-not (Test-Path '.venv') -and -not (Test-Path 'annihilation-env') -and -not (Test-Path 'venv') -and -not (Test-Path 'env')) {{ Write-Output 'First run detected: Creating annihilation-env virtual environment... (NOTE: Initial setup and PyTorch extraction can take 15-20 minutes)'; python -m venv annihilation-env; Write-Output 'Virtual environment created successfully.' }}; $python = if (Test-Path 'annihilation-env') {{ '.\\annihilation-env\\Scripts\\python.exe' }} elseif (Test-Path '.venv') {{ '.\\.venv\\Scripts\\python.exe' }} elseif (Test-Path 'venv') {{ '.\\venv\\Scripts\\python.exe' }} else {{ '.\\env\\Scripts\\python.exe' }}; & $python -u verify_env_windows.py {}", gpu_arg));
+
+        let mut cmd = if cfg!(windows) {
+            // The setup chain on Windows stays on PowerShell so the exact
+            // behaviour that shipped in 1.4.x is preserved: create the venv if
+            // none exists, then run the verify script with the venv's python.
+            let mut cmd = Command::new("powershell");
+            cmd.arg("-Command");
+            cmd.arg(format!("if (-not (Test-Path '.venv') -and -not (Test-Path 'annihilation-env') -and -not (Test-Path 'venv') -and -not (Test-Path 'env')) {{ Write-Output 'First run detected: Creating annihilation-env virtual environment... (NOTE: Initial setup and PyTorch extraction can take 15-20 minutes)'; python -m venv annihilation-env; Write-Output 'Virtual environment created successfully.' }}; $python = if (Test-Path 'annihilation-env') {{ '.\\annihilation-env\\Scripts\\python.exe' }} elseif (Test-Path '.venv') {{ '.\\.venv\\Scripts\\python.exe' }} elseif (Test-Path 'venv') {{ '.\\venv\\Scripts\\python.exe' }} else {{ '.\\env\\Scripts\\python.exe' }}; & $python -u verify_env.py {}", gpu_arg));
+            cmd
+        } else {
+            // Linux and macOS have no PowerShell; the same chain runs natively:
+            // create the venv if none exists, then run the verify script with
+            // the venv's python. `python_exe()` returns whichever of the known
+            // venv names exists first, or the `.venv` fallback when none do.
+            let none_exist = !VENV_NAMES
+                .iter()
+                .any(|venv| root.join(venv_python_rel(venv)).exists());
+
+            if none_exist {
+                // Route through the channel, not stdout: ratatui owns the
+                // terminal in raw mode, so anything written to stdout corrupts
+                // the TUI. The PowerShell branch gets these messages into the
+                // log panel via Write-Output through the piped stdout; this
+                // is the same destination on POSIX.
+                let _ = tx.send(SubprocessMessage::Event(parser::ParsedEvent::Status(
+                    "First run detected: Creating annihilation-env virtual environment... (NOTE: Initial setup and PyTorch extraction can take 15-20 minutes)".to_string(),
+                )));
+                let create = Command::new(python_command().unwrap_or("python"))
+                    .arg("-m")
+                    .arg("venv")
+                    .arg("annihilation-env")
+                    .current_dir(&root)
+                    .status();
+                match create {
+                    Ok(s) if s.success() => {
+                        let _ = tx.send(SubprocessMessage::Event(parser::ParsedEvent::Status(
+                            "Virtual environment created successfully.".to_string(),
+                        )));
+                    }
+                    Ok(s) => {
+                        let _ = tx.send(SubprocessMessage::SpawnError(format!(
+                            "Setup error: creating annihilation-env failed with {s}"
+                        )));
+                        return Self {
+                            rx,
+                            child: None,
+                            stdin_tx: None,
+                        };
+                    }
+                    Err(e) => {
+                        let _ = tx.send(SubprocessMessage::SpawnError(format!(
+                            "Setup error: creating annihilation-env failed: {e}"
+                        )));
+                        return Self {
+                            rx,
+                            child: None,
+                            stdin_tx: None,
+                        };
+                    }
+                }
+            }
+
+            let mut cmd = Command::new(python_exe());
+            cmd.arg("-u");
+            cmd.arg("verify_env.py");
+            if !gpu_arg.is_empty() {
+                cmd.arg(gpu_arg);
+            }
+            cmd
+        };
 
         cmd.current_dir(&root);
 
@@ -891,6 +1006,40 @@ mod tests {
                 python_checkpoint_name(model),
                 "checkpoint name diverged from the Python side for {model:?}"
             );
+        }
+    }
+
+    #[test]
+    fn venv_python_rel_layout_matches_python() {
+        // The layout Python's own `venv` module creates, so a near-miss here
+        // (e.g. probing `Scripts` on Unix) would silently skip every venv.
+        if cfg!(windows) {
+            assert_eq!(
+                venv_python_rel("annihilation-env"),
+                PathBuf::from("annihilation-env")
+                    .join("Scripts")
+                    .join("python.exe")
+            );
+        } else {
+            assert_eq!(
+                venv_python_rel("annihilation-env"),
+                PathBuf::from("annihilation-env").join("bin").join("python")
+            );
+        }
+    }
+
+    #[test]
+    fn python_command_prefers_python_then_python3() {
+        // Whichever of the two resolves first through PATH wins; the order
+        // matters because a system can have both (e.g. `python` from pyenv
+        // and `python3` from the distro), and the TUI must follow the same
+        // resolution every spawn.
+        if which("python") {
+            assert_eq!(python_command(), Some("python"));
+        } else if cfg!(not(windows)) && which("python3") {
+            assert_eq!(python_command(), Some("python3"));
+        } else {
+            assert_eq!(python_command(), None);
         }
     }
 
