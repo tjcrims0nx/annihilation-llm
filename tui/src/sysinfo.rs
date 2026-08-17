@@ -1,6 +1,10 @@
 //! Real system hardware detection.
 //!
-//! Queries GPU info via `nvidia-smi` and RAM usage via Windows commands.
+//! Queries GPU info via `nvidia-smi`, CPU brand via the native platform
+//! command (Win32_Processor on Windows, `/proc/cpuinfo` on Linux,
+//! `sysctl -n machdep.cpu.brand_string` on macOS), and RAM usage via
+//! platform commands (PowerShell on Windows, `free` on Linux, `vm_stat` +
+//! `hw.memsize` on macOS).
 
 use std::process::Command;
 
@@ -82,7 +86,7 @@ impl SystemInfo {
             }
         }
 
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
         {
             if let Ok(output) = Command::new("sh").args(["-c", "cat /proc/cpuinfo | grep -i 'model name' | head -n 1 | awk -F: '{print $2}' | xargs"]).output() {
                 if output.status.success() {
@@ -92,6 +96,35 @@ impl SystemInfo {
                     self.gpu_name = "CPU (Unknown)".to_string();
                 }
             }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // macOS has no /proc; `machdep.cpu.brand_string` is the native
+            // equivalent ("Apple M4" on Apple Silicon, the Intel brand string
+            // on older Macs).
+            if let Ok(output) = Command::new("sysctl")
+                .args(["-n", "machdep.cpu.brand_string"])
+                .output()
+            {
+                if output.status.success() {
+                    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    self.gpu_name = if name.is_empty() {
+                        "CPU (Unknown)".to_string()
+                    } else {
+                        format!("CPU: {}", name)
+                    };
+                } else {
+                    self.gpu_name = "CPU (Unknown)".to_string();
+                }
+            }
+        }
+
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        {
+            // Unknown Unix: leave the nvidia-smi result if one was found,
+            // otherwise stop at a concrete label instead of "Detecting...".
+            self.gpu_name = "CPU (Unknown)".to_string();
         }
     }
 
@@ -118,7 +151,7 @@ impl SystemInfo {
             }
         }
 
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
         {
             let output = Command::new("sh")
                 .args(["-c", "free -m | awk '/^Mem:/ {print $2 \",\" $3}'"])
@@ -133,6 +166,53 @@ impl SystemInfo {
                     self.ram_total_mb = parts[0].parse().unwrap_or(0.0);
                     self.ram_used_mb = parts[1].parse().unwrap_or(0.0);
                 }
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // macOS has no `free`. Total comes from `sysctl -n hw.memsize`
+            // (bytes); used is what Activity Monitor counts as used memory:
+            // active + wired + compressed pages from `vm_stat`.
+            if let Ok(total_out) = Command::new("sysctl").args(["-n", "hw.memsize"]).output()
+                && total_out.status.success()
+            {
+                let total_bytes: f64 = String::from_utf8_lossy(&total_out.stdout)
+                    .trim()
+                    .parse()
+                    .unwrap_or(0.0);
+                if total_bytes > 0.0 {
+                    self.ram_total_mb = total_bytes / (1024.0 * 1024.0);
+                }
+            }
+
+            if let Ok(vm_out) = Command::new("vm_stat").output()
+                && vm_out.status.success()
+            {
+                let text = String::from_utf8_lossy(&vm_out.stdout);
+                let mut page_size: f64 = 4096.0;
+                let mut active: f64 = 0.0;
+                let mut wired: f64 = 0.0;
+                let mut compressed: f64 = 0.0;
+
+                for line in text.lines() {
+                    let digits: String = line.matches(char::is_numeric).collect();
+
+                    if line.contains("page size") {
+                        // "Mach Virtual Memory Statistics: (page size of 16384 bytes)"
+                        page_size = digits.parse().unwrap_or(4096.0);
+                    } else if let Ok(pages) = digits.parse::<f64>() {
+                        if line.starts_with("Pages active:") {
+                            active = pages;
+                        } else if line.starts_with("Pages wired down:") {
+                            wired = pages;
+                        } else if line.starts_with("Pages occupied by compressor:") {
+                            compressed = pages;
+                        }
+                    }
+                }
+
+                self.ram_used_mb = (active + wired + compressed) * page_size / (1024.0 * 1024.0);
             }
         }
     }

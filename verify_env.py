@@ -8,6 +8,19 @@ import sys
 # integrated: `--kernel-type`, `--use-cosmic-layer-selection`, `--use-ega`.
 OBLITERATUS_SETTINGS = ("kernel_type", "use_cosmic_layer_selection", "use_ega")
 
+# Probe run in a subprocess so nothing torch imports stays loaded in this
+# interpreter, the same reason the CUDA check in main() is out of process.
+ACCELERATOR_PROBE = (
+    "import torch\n"
+    "if torch.cuda.is_available():\n"
+    "    print('CUDA available')\n"
+    "elif getattr(torch.backends, 'mps', None) is not None"
+    " and torch.backends.mps.is_available():\n"
+    "    print('MPS (Apple Metal) available')\n"
+    "else:\n"
+    "    print('CPU only')\n"
+)
+
 
 def in_virtual_env() -> bool:
     return sys.prefix != sys.base_prefix
@@ -96,6 +109,7 @@ def check_obliteratus_settings() -> str | None:
 
 
 def main():
+    """Verify the environment and repair a CPU-only torch on Windows."""
     is_gpu = "--gpu" in sys.argv
     needs_install = False
 
@@ -142,7 +156,11 @@ def main():
             subprocess.run(cmd, check=True, env=uv_env())
         else:
             cmd = [sys.executable, "-m", "pip", "install", ".", "--no-cache-dir"]
-            if is_gpu:
+            if is_gpu and sys.platform == "win32":
+                # The cu126 wheel index is Windows-only. Linux PyPI torch
+                # already bundles the CUDA libraries, and macOS uses Metal,
+                # so there the extra index cannot help and only risks a
+                # downgrade to a mismatched wheel.
                 cmd.extend(
                     ["--extra-index-url", "https://download.pytorch.org/whl/cu126"]
                 )
@@ -173,7 +191,29 @@ def main():
             )
             sys.exit(1)
 
-    if is_gpu:
+    if is_gpu and sys.platform != "win32":
+        # The reinstall branch below repairs a CPU-only PyTorch by pulling the
+        # NVIDIA CUDA wheel index, which only exists for Windows. On Linux
+        # the PyPI torch wheels already bundle the CUDA libraries, and macOS
+        # has no NVIDIA GPUs at all (Apple Silicon uses Metal instead), so
+        # there is nothing to reinstall: report what the interpreter actually
+        # sees and let the user act on it.
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", ACCELERATOR_PROBE],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            print(f"Accelerator status: {result.stdout.strip()}", flush=True)
+        except subprocess.CalledProcessError:
+            print("WARNING: Failed to probe the accelerator status.", flush=True)
+
+        print(
+            "Environment verification passed! All dependencies correctly installed.",
+            flush=True,
+        )
+    elif is_gpu:
         # Use a subprocess to check CUDA availability without loading the DLL into this process
         try:
             result = subprocess.run(
