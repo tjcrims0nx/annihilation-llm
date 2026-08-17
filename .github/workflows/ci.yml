@@ -41,11 +41,17 @@ jobs:
         run: uv run ty check --error-on-warning .
 
   tui:
-    name: Check and build TUI
-    # The TUI is a Windows application: it shells out to powershell and resolves
-    # the venv interpreter at Scripts/python.exe. Building it anywhere else
-    # would pass without exercising the platform it actually ships on.
-    runs-on: windows-latest
+    name: Check and build TUI (${{ matrix.os }})
+    # The TUI ships on Windows, Linux, and macOS: each OS shells out to a
+    # different interpreter layout (Scripts/python.exe vs bin/python) and a
+    # different bootstrap chain (PowerShell on Windows, native on POSIX).
+    # Building on every OS exercises all three cfg paths instead of passing
+    # one and assuming the others compile.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
 
     defaults:
       run:
