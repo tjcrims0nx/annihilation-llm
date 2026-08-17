@@ -47,6 +47,10 @@ test_out.txt
 # Agent artifacts
 .agents/
 
+# Local planning and research notes
+/plans/
+/research/
+
 # TUI state files
 .recent_models
 tui/.recent_models
