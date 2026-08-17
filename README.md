@@ -97,6 +97,12 @@ The default tasks are `hellaswag` and `arc_easy`. Any `lm-eval` task works when 
 .\annihilation-env\Scripts\python.exe -u scripts/run_benchmarks.py openbmb/MiniCPM5-1B mmlu,gsm8k
 ```
 
+On Linux and macOS, run the same command from the POSIX virtual environment instead:
+
+```bash
+./annihilation-env/bin/python -u scripts/run_benchmarks.py openbmb/MiniCPM5-1B mmlu,gsm8k
+```
+
 The harness ships with the engine, so there is nothing extra to install. Nothing is written to disk either — the model is reconstructed in memory, so benchmarking never leaves an export behind. A completed run is required: with no checkpoint for that model, it stops with `No checkpoint found ... Run annihilation first.`
 
 ---
@@ -124,9 +130,15 @@ Conversion runs in two stages, matching llama.cpp's own pipeline:
 .\annihilation-env\Scripts\python.exe scripts/gguf_converter.py --model-path openbmb/MiniCPM5-1B --quant-type Q4_K_M --output exports/minicpm5-Q4_K_M.gguf
 ```
 
-**On the llama.cpp toolchain.** It is downloaded on first use, not vendored. Prebuilt Windows binaries come from the latest [`ggml-org/llama.cpp`](https://github.com/ggml-org/llama.cpp) release, and the matching source archive is pinned to that same release tag instead of tracking `master`. Because both are *executed*, they are treated as code: downloads are restricted to HTTPS, the SHA-256 is verified against GitHub's published asset digest, and archive members that would escape the extraction directory are rejected outright. Pin your own digests with `LLAMA_CPP_BIN_SHA256` and `LLAMA_CPP_SRC_SHA256`.
+On Linux and macOS, run the same command from the POSIX virtual environment instead:
 
-> 💡 **Note:** automatic binary download is currently Windows-only. On Linux and macOS, place a `llama-quantize` binary under `scripts/llama_cpp_bin/` yourself; the conversion script is still fetched automatically.
+```bash
+./annihilation-env/bin/python scripts/gguf_converter.py --model-path openbmb/MiniCPM5-1B --quant-type Q4_K_M --output exports/minicpm5-Q4_K_M.gguf
+```
+
+**On the llama.cpp toolchain.** It is downloaded on first use, not vendored. Prebuilt binaries come from the latest [`ggml-org/llama.cpp`](https://github.com/ggml-org/llama.cpp) release — Windows `win-cpu-x64`, Linux `ubuntu-x64`/`ubuntu-arm64`, and macOS `macos-arm64`/`macos-x64` — and the matching source archive is pinned to that same release tag instead of tracking `master`. Because both are *executed*, they are treated as code: downloads are restricted to HTTPS, the SHA-256 is verified against GitHub's published asset digest, and archive members that would escape the extraction directory are rejected outright. Pin your own digests with `LLAMA_CPP_BIN_SHA256` and `LLAMA_CPP_SRC_SHA256`.
+
+> 💡 **Note:** on Linux the "ubuntu" build is the generic glibc binary, the sensible default for Linux distributions. On musl-based systems (Alpine), prebuilt binaries may not work; place a `llama-quantize` build under `scripts/llama_cpp_bin/` yourself; the conversion script is still fetched automatically.
 
 ---
 
@@ -142,13 +154,23 @@ If you want to bypass the TUI entirely and use the core Python CLI, you can run 
 .\annihilation-env\Scripts\python.exe -m annihilate --version
 ```
 
+On Linux and macOS, run the same commands from the POSIX virtual environment instead:
+
+```bash
+./annihilation-env/bin/python -m annihilate --help
+# Example:
+./annihilation-env/bin/python -m annihilate --model openbmb/MiniCPM5-1B --n-trials 200
+# Check the installed engine version:
+./annihilation-env/bin/python -m annihilate --version
+```
+
 ---
 
 ## 🚀 Quick Start
 
 Ensure you have **Python 3.10+** and **Rust** installed, and that your PyTorch installation supports CUDA (if you are using an NVIDIA GPU).
 
-### Setup & Launch
+### Windows
 
 The TUI is the Rust front-end; the abliteration engine ships as the [`annihilate-llm`](https://pypi.org/project/annihilate-llm/) package on PyPI. Install the engine into a virtual environment at the repository root, then launch the TUI:
 
@@ -166,6 +188,25 @@ uv pip install --python annihilation-env annihilate-llm
 The TUI locates the interpreter by checking `annihilation-env`, `.venv`, `venv`, and `env` at the repository root, in that order — any of those names works. The order matters when more than one exists, which is common: `uv` creates `.venv` by default, so a repository with both directories uses `annihilation-env`.
 
 > 💡 **Note:** `start.bat` compiles the Rust TUI, so the very first launch takes a minute. Subsequent launches are near-instant. It does **not** create the Python environment — do that once, as above.
+
+### Linux and macOS
+
+The same flow runs natively, with the virtual environment under the POSIX layout (`bin/python` instead of `Scripts\python.exe`). On Linux with an NVIDIA GPU the PyPI PyTorch wheels already bundle the CUDA libraries; on macOS the engine uses Apple Silicon Metal instead:
+
+```bash
+git clone https://github.com/tjcrims0nx/annihilation-llm.git
+cd annihilation-llm
+
+# Create the environment the TUI looks for and install the engine into it
+uv venv annihilation-env
+uv pip install --python annihilation-env annihilate-llm
+
+./start.sh
+```
+
+Alternatively the TUI creates and verifies the environment automatically on first run, in which case `start.sh` is the only command needed.
+
+> 💡 **Note:** `start.sh` compiles the Rust TUI, so the very first launch takes a minute. Subsequent launches are near-instant.
 
 ---
 
