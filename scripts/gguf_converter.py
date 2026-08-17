@@ -4,9 +4,12 @@ import importlib.util
 import io
 import json
 import os
+import platform
 import shutil
+import stat
 import subprocess
 import sys
+import tarfile
 import urllib.parse
 import urllib.request
 import zipfile
@@ -76,24 +79,91 @@ def _download_verified(url: str, dest: Path, expected_sha256: str | None = None)
     return actual
 
 
-def _safe_extract(zip_path: Path, dest: Path):
-    """Extract `zip_path` into `dest`, rejecting members that escape `dest`.
+def _bin_flavor() -> str:
+    """The release-asset flavor fragment that identifies this machine.
+
+    llama.cpp release assets are named `llama-<tag>-bin-<flavor>.<ext>`,
+    e.g. `llama-b10472-bin-win-cpu-x64.zip` or
+    `llama-b10472-bin-macos-arm64.tar.gz`.
+    """
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    if machine in ("amd64", "x86_64"):
+        arch = "x64"
+    elif machine in ("arm64", "aarch64"):
+        arch = "arm64"
+    else:
+        print_event(
+            "error",
+            f"No llama.cpp prebuilt binary is available for this architecture "
+            f"({machine}). Place a `llama-quantize` build under "
+            f"llama_cpp_bin/ manually to continue.",
+        )
+        sys.exit(1)
+
+    if system == "windows":
+        return f"win-cpu-{arch}"
+    if system == "darwin":
+        return f"macos-{arch}"
+    if system == "linux":
+        # The "ubuntu" build is the generic glibc Linux binary, the sensible
+        # default for Linux distributions. musl-based systems (Alpine) may
+        # need to build llama.cpp from source instead.
+        return f"ubuntu-{arch}"
+
+    print_event(
+        "error",
+        f"No llama.cpp prebuilt binary is available for this operating system "
+        f"({system}). Place a `llama-quantize` build under "
+        f"llama_cpp_bin/ manually to continue.",
+    )
+    sys.exit(1)
+
+
+def _safe_extract_archive(archive: Path, dest: Path):
+    """Extract a `.zip` or `.tar.gz` into `dest`, rejecting members that
+    escape `dest`.
 
     `ZipFile.extractall` already sanitizes member paths, but it does so
     silently. Failing loudly means a malformed archive surfaces as an error
-    rather than as files quietly landing somewhere unexpected.
+    rather than as files quietly landing somewhere unexpected. For tarballs
+    the executable bit is restored on extracted binaries as well: GitHub
+    archives preserve permissions, but a tar member arriving without it
+    would make quantize fail with a permission error at conversion time.
     """
     dest_resolved = dest.resolve()
-    with zipfile.ZipFile(zip_path, "r") as zip_ref:
-        for member in zip_ref.namelist():
-            target = (dest_resolved / member).resolve()
-            if target != dest_resolved and dest_resolved not in target.parents:
-                print_event(
-                    "error",
-                    f"Archive {zip_path.name} contains an unsafe path: {member}",
-                )
-                sys.exit(1)
-        zip_ref.extractall(dest)
+
+    def check_member(name: str):
+        target = (dest_resolved / name).resolve()
+        if target != dest_resolved and dest_resolved not in target.parents:
+            print_event(
+                "error",
+                f"Archive {archive.name} contains an unsafe path: {name}",
+            )
+            sys.exit(1)
+
+    if archive.suffix == ".zip":
+        with zipfile.ZipFile(archive, "r") as zip_ref:
+            for member in zip_ref.namelist():
+                check_member(member)
+            zip_ref.extractall(dest)
+        return
+
+    with tarfile.open(archive, "r:*") as tar_ref:
+        for member in tar_ref.getmembers():
+            check_member(member.name)
+        try:
+            # `filter="data"` is defence in depth beyond the path check above:
+            # it additionally rejects device files and hard links. It exists
+            # only in newer Python patch releases, so fall back gracefully.
+            tar_ref.extractall(dest, filter="data")
+        except TypeError:
+            tar_ref.extractall(dest)
+        for member in tar_ref.getmembers():
+            if member.isfile():
+                extracted = dest / member.name
+                mode = extracted.stat().st_mode
+                extracted.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
 def ensure_llama_cpp(bin_dir: Path):
@@ -109,59 +179,55 @@ def ensure_llama_cpp(bin_dir: Path):
 
     if quantize_exe is None:
         print_event("info", "Downloading llama.cpp prebuilt binaries...")
-        if os.name == "nt":
-            req = urllib.request.Request(
-                "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
-                headers={"User-Agent": "Mozilla/5.0"},
-            )
-            url = None
-            expected_digest = None
-            try:
-                with urllib.request.urlopen(req) as response:
-                    data = json.loads(response.read().decode())
-                    release_tag = data.get("tag_name")
-                    for asset in data["assets"]:
-                        if (
-                            "llama-" in asset["name"]
-                            and "win-cpu-x64" in asset["name"]
-                            and "bin" in asset["name"]
-                        ):
-                            url = asset["browser_download_url"]
-                            # GitHub publishes asset digests as "sha256:<hex>".
-                            digest = asset.get("digest") or ""
-                            if digest.lower().startswith("sha256:"):
-                                expected_digest = digest.split(":", 1)[1]
-                            break
-            except Exception as e:
-                print_event("error", f"Failed to fetch latest release info: {e}")
-                sys.exit(1)
+        # The same fetch-and-verify path on every platform; only the asset
+        # flavor and the archive format differ.
+        flavor = _bin_flavor()
 
-            if not url:
-                print_event(
-                    "error",
-                    "Could not find a valid llama.cpp release asset for Windows.",
-                )
-                sys.exit(1)
+        req = urllib.request.Request(
+            "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        url = None
+        expected_digest = None
+        try:
+            with urllib.request.urlopen(req) as response:
+                data = json.loads(response.read().decode())
+            release_tag = data.get("tag_name")
+            for asset in data["assets"]:
+                if (
+                    "llama-" in asset["name"]
+                    and f"-{flavor}" in asset["name"]
+                    and "bin" in asset["name"]
+                ):
+                    url = asset["browser_download_url"]
+                    # GitHub publishes asset digests as "sha256:<hex>".
+                    digest = asset.get("digest") or ""
+                    if digest.lower().startswith("sha256:"):
+                        expected_digest = digest.split(":", 1)[1]
+                    break
+        except Exception as e:
+            print_event("error", f"Failed to fetch latest release info: {e}")
+            sys.exit(1)
 
-            # An explicit pin always wins over whatever the API reports.
-            expected_digest = os.environ.get("LLAMA_CPP_BIN_SHA256") or expected_digest
-
-            print_event("info", f"Downloading from {url}...")
-            zip_path = bin_dir / "llama.zip"
-            _download_verified(url, zip_path, expected_digest)
-            _safe_extract(zip_path, bin_dir)
-            zip_path.unlink()
-
-            quantize_exe = _find_file(bin_dir, quantize_name)
-            if quantize_exe is None:
-                print_event(
-                    "error", f"Could not find {quantize_name} after extraction."
-                )
-                sys.exit(1)
-        else:
+        if not url:
             print_event(
-                "error", "Only Windows automatic download is supported currently."
+                "error",
+                f"Could not find a valid llama.cpp release asset for {flavor}.",
             )
+            sys.exit(1)
+
+        # An explicit pin always wins over whatever the API reports.
+        expected_digest = os.environ.get("LLAMA_CPP_BIN_SHA256") or expected_digest
+
+        print_event("info", f"Downloading from {url}...")
+        archive_path = bin_dir / ("llama.zip" if os.name == "nt" else "llama.tar.gz")
+        _download_verified(url, archive_path, expected_digest)
+        _safe_extract_archive(archive_path, bin_dir)
+        archive_path.unlink()
+
+        quantize_exe = _find_file(bin_dir, quantize_name)
+        if quantize_exe is None:
+            print_event("error", f"Could not find {quantize_name} after extraction.")
             sys.exit(1)
 
     # Download the full llama.cpp source for convert_hf_to_gguf.py + conversion module.
@@ -184,7 +250,7 @@ def ensure_llama_cpp(bin_dir: Path):
             url = f"https://github.com/ggml-org/llama.cpp/archive/{ref}.zip"
             src_zip = bin_dir / "llama_src.zip"
             _download_verified(url, src_zip, os.environ.get("LLAMA_CPP_SRC_SHA256"))
-            _safe_extract(src_zip, bin_dir)
+            _safe_extract_archive(src_zip, bin_dir)
             src_zip.unlink()
 
             convert_py = _find_file(bin_dir, "convert_hf_to_gguf.py")
